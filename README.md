@@ -5,6 +5,6 @@
 
 ## Active labeling
 
-# Embedding functions
+# Embeddings
 
-https://github.com/bioacoustic-ai/bacpipe
+- [ ] embed audio using https://github.com/bioacoustic-ai/bacpipe
