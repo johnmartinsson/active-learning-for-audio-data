@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-import wave
+import librosa
 
 class LabelingStrategy(ABC):
     def __init__(self, model):
@@ -15,11 +15,8 @@ class FixedLengthLabelingStrategy(LabelingStrategy):
         self.segment_length = segment_length
 
     def segment_audio(self, audio_file):
-        with wave.open(audio_file, 'rb') as wf:
-            frame_rate = wf.getframerate()
-            num_frames = wf.getnframes()
-            audio = wf.readframes(num_frames)
-        
-        segment_size = self.segment_length * frame_rate * wf.getsampwidth()
-        segments = [audio[i:i + segment_size] for i in range(0, len(audio), segment_size)]
+        y, sr = librosa.load(audio_file)
+        segment_length_samples = int(self.segment_length * sr)
+        num_segments = len(y) // segment_length_samples
+        segments = [(i * self.segment_length, (i + 1) * self.segment_length) for i in range(num_segments)]
         return segments
