@@ -1,0 +1,26 @@
+The main part of the annotation tool will take a file object
+
+{
+    filename: file,
+    audio: `/data/baby_cries/audio/${file}`,
+    spectrogram: `/data/baby_cries/spectrograms/${file.replace('.wav', '.png')}`,
+    embeddings: `/data/baby_cries/embeddings/${file.replace('.wav', '.json')}`
+}
+
+and render the interactive annotation interface. It should look like this:
+
+---------------------
+- Spectrogram image -
+---------------------
+- Audio waveform    -
+---------------------
+
+Using the embeddings, the segmentation of the audio file is computed. Initially, we have a fixed-length labeling strategy that is actually independent of the embeddings, but later we will create labeling strategies that depend
+on the embeddings (or other features of the audio). So, keep this in mind when designing the project so these
+things are modular.
+
+The goal is to display the segments [(start_0, end_0), (start_1, end_1), ..., ] overlayed with both the spectrogram image, and the audio waveform. Initially we only see the boundaries of the segments, but if a user clicks a segment we add an opaque color to that part of the spectrogram and audio waveform (green) that indicates presence of a sound event in that segment.
+
+It is important that the spectrogram image and the audio waveform are aligned. The audio should be playable, in which case a line moves from left to right over the spectrogram and waveform indicating what time we are listening to.
+
+Can you help me create a set of react components and suggest an App.js that achieives this?
