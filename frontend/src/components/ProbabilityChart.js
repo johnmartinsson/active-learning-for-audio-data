@@ -1,11 +1,24 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { LineChart, Line, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const ProbabilityChart = ({ probabilities, timings, audioLength }) => {
-    const data = probabilities.map((prob, index) => ({
-        time: (timings[index][0] + timings[index][1]) / 2,
-        probability: prob
-    }));
+    const [data, setData] = useState([]);
+
+    useEffect(() => {
+        // Add 3 dummy probabilities to the beginning of the array to make the chart start at time 0
+        const modifiedProbabilities = [...probabilities];
+        for (let i = 0; i < 3; i++) {
+            modifiedProbabilities.unshift(0);
+        }
+        // Add 1 dummy probability to the end of the array to make the chart end at the audio length
+        modifiedProbabilities.push(0);
+
+        const chartData = modifiedProbabilities.map((prob, index) => ({
+            probability: prob
+        }));
+
+        setData(chartData);
+    }, [probabilities]);
 
     return (
         <ResponsiveContainer width="100%" height={200}>
