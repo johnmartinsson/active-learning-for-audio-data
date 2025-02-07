@@ -7,17 +7,30 @@ require('dotenv').config();
 const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, process.env.METADATA_FILE);
 const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
 
-const audioFiles = metadata.files.audio_files;
+const getLabeledFiles = () => {
+    const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
+    if (!fs.existsSync(labelsDir)) {
+        return [];
+    }
+    return fs.readdirSync(labelsDir).map(file => path.parse(file).name);
+};
+
+const getUnlabeledFiles = () => {
+    const labeledFiles = getLabeledFiles();
+    const allFiles = metadata.files.audio_files.map(file => path.parse(file).name);
+    return allFiles.filter(file => !labeledFiles.includes(file));
+};
 
 const getBatch = (req, res) => {
-    const strategy = new RandomSamplingStrategy(audioFiles, 5);
+    const unlabeledFiles = getUnlabeledFiles();
+    const strategy = new RandomSamplingStrategy(unlabeledFiles, 1);
     const sampledFiles = strategy.sample();
     const batch = sampledFiles.map(file => ({
         filename: file,
-        audio_length: metadata.files.audio_lengths[file],
-        audio_path: `/data/${process.env.DATASET_NAME}/audio/${file}`,
-        spectrogram_path: `/data/${process.env.DATASET_NAME}/spectrograms/${file.replace('.wav', '.png')}`,
-        embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${file.replace('.wav', '.birdnet.embeddings.msgpack')}`
+        audio_length: metadata.files.audio_lengths[`${file}.wav`],
+        audio_path: `/data/${process.env.DATASET_NAME}/audio/${file}.wav`,
+        spectrogram_path: `/data/${process.env.DATASET_NAME}/spectrograms/${file}.png`,
+        embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${file}.birdnet.embeddings.msgpack`
     }));
     res.status(200).json({ batch });
 };
@@ -146,4 +159,4 @@ const getPrototypes = (req, res) => {
     });
 };
 
-module.exports = { getBatch, submitLabels, getPrototypes };
+module.exports = { getBatch, submitLabels, getPrototypes, getLabeledFiles, getUnlabeledFiles };

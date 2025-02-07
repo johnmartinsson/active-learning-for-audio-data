@@ -62,6 +62,17 @@ class ActiveLabelingStrategy extends LabelingStrategy {
         return changePoints;
     }
 
+    isBiModal(probabilities) {
+        const lowThreshold = 0.3;
+        const highThreshold = 0.7;
+        const lowCount = probabilities.filter(p => p <= lowThreshold).length;
+        const highCount = probabilities.filter(p => p >= highThreshold).length;
+        const totalCount = probabilities.length;
+
+        // Check if there are significant clusters around 0 and 1
+        return (lowCount / totalCount > 0.1) && (highCount / totalCount > 0.1);
+    }
+
     segment(audioLength, numSegments, probabilities, timings) {
         const changePoints = this.detectChangePoints(probabilities, numSegments);
         const segments = [];
@@ -116,7 +127,16 @@ const SegmentLabeler = ({ file, numSegments, setSegments, setLabels }) => {
                     return hasPresence ? 'presence' : 'absence';
                 });
 
-                setLabels(suggested_segment_labels);
+                // I think it would make sense to only suggest labels if the probabilities are bi-modal
+                // Otherwise they are not well separated, and the suggestions might not be accurate
+                // There are probably even better criterions for this, but this is a simple one
+                const isBiModal = strategy.isBiModal(probabilities);
+                if (!isBiModal) {
+                    setLabels(new Array(numSegments).fill('absence'));
+                }
+                else {
+                    setLabels(suggested_segment_labels);
+                }
                 setProbabilities(probabilities);
                 setLocalSegments(segments);
             } catch (error) {
