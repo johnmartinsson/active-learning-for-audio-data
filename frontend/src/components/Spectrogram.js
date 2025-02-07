@@ -7,7 +7,6 @@ const Spectrogram = ({ src, currentTime, segments, labels, toggleLabel, duration
         const rect = containerRef.current.getBoundingClientRect();
         const x = event.clientX - rect.left;
         const time = (x / rect.width) * duration;
-        console.log(`Click position: ${x}, Time: ${time}`);
         toggleLabel(time);
     };
 

@@ -19,7 +19,6 @@ const AnnotationTool = ({ file }) => {
     };
 
     const toggleLabel = (time) => {
-        console.log(`Toggle label at time: ${time}`);
         const updatedLabels = labels.map((label, index) => {
             const segment = segments[index];
             if (time >= segment.start && time < segment.end) {
@@ -28,6 +27,36 @@ const AnnotationTool = ({ file }) => {
             return label;
         });
         setLabels(updatedLabels);
+    };
+
+    const handleSubmit = async () => {
+        const data = segments.map((segment, index) => ({
+            start_time: segment.start,
+            end_time: segment.end,
+            label: labels[index]
+        }));
+    
+        try {
+            const response = await fetch('http://localhost:5000/api/audio/submit_labels', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    filename: file.filename,
+                    labels: data
+                })
+            });
+    
+            const result = await response.json();
+            if (response.ok) {
+                console.log('Labels submitted successfully:', result.message);
+            } else {
+                console.error('Failed to submit labels:', result.message);
+            }
+        } catch (error) {
+            console.error('Error submitting labels:', error);
+        }
     };
 
     return (
@@ -70,6 +99,7 @@ const AnnotationTool = ({ file }) => {
                 setSegments={setSegments}
                 setLabels={setLabels}
             />
+            <button onClick={handleSubmit}>Submit Labels and Update Model</button>
         </div>
     );
 };
