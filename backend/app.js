@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -7,7 +8,7 @@ app.use(cors());
 app.use(express.json());
 
 // Serve static files
-app.use('/data', express.static(path.join(__dirname, '../data')));
+app.use('/data', express.static(path.join(process.env.DATA_DIR)));
 
 // Routes
 const audioRoutes = require('./routes/audioRoutes');
