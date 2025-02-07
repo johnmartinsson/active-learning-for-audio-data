@@ -19,9 +19,14 @@ const AnnotationTool = ({ file }) => {
     };
 
     const toggleLabel = (time) => {
+        if (!segments || segments.length === 0) {
+            console.error('Segments are not initialized');
+            return;
+        }
+
         const updatedLabels = labels.map((label, index) => {
             const segment = segments[index];
-            if (time >= segment.start && time < segment.end) {
+            if (segment && time >= segment.start && time < segment.end) {
                 return label === 'absence' ? 'presence' : 'absence';
             }
             return label;
@@ -84,6 +89,7 @@ const AnnotationTool = ({ file }) => {
                     toggleLabel={toggleLabel}
                     duration={file.audio_length}
                 />
+                <button onClick={handleSubmit}>Submit Labels</button>
                 <Waveform
                     src={`http://localhost:5000${file.audio_path}`}
                     currentTime={currentTime}
@@ -92,14 +98,13 @@ const AnnotationTool = ({ file }) => {
                     duration={file.audio_length}
                 />
                 <button onClick={handlePlayPause}>{isPlaying ? 'Pause' : 'Play'}</button>
+                <SegmentLabeler
+                    file={file}
+                    numSegments={numSegments}
+                    setSegments={setSegments}
+                    setLabels={setLabels}
+                />
             </div>
-            <SegmentLabeler
-                file={file}
-                numSegments={numSegments}
-                setSegments={setSegments}
-                setLabels={setLabels}
-            />
-            <button onClick={handleSubmit}>Submit Labels and Update Model</button>
         </div>
     );
 };

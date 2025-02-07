@@ -96,6 +96,14 @@ const getPrototypes = (req, res) => {
             return res.status(500).json({ message: 'Failed to read labels directory' });
         }
 
+        if (files.length === 0) {
+            // Return random prototypes if there are no labeled files
+            const randomPrototype = () => Array.from({ length: 1024 }, () => Math.random());
+            const presence_prototype = randomPrototype();
+            const absence_prototype = randomPrototype();
+            return res.status(200).json({ presence_prototype, absence_prototype });
+        }
+
         files.forEach(file => {
             const labelPath = path.join(labelsDir, file);
             const embeddingsPath = path.join(embeddingsDir, `${path.parse(file).name}.birdnet.embeddings.msgpack`);
@@ -131,8 +139,8 @@ const getPrototypes = (req, res) => {
             return sum.map(val => val / embeddings.length);
         };
 
-        const presence_prototype = average(presence_embeddings);
-        const absence_prototype = average(absence_embeddings);
+        const presence_prototype = presence_embeddings.length > 0 ? average(presence_embeddings) : Array.from({ length: 1024 }, () => Math.random());
+        const absence_prototype = absence_embeddings.length > 0 ? average(absence_embeddings) : Array.from({ length: 1024 }, () => Math.random());
 
         res.status(200).json({ presence_prototype, absence_prototype });
     });

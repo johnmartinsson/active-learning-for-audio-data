@@ -17,6 +17,7 @@
         "react": "^18.0.0",
         "react-dom": "^18.0.0",
         "react-scripts": "5.0.0",
+        "recharts": "^2.15.1",
         "wavesurfer.js": "^6.6.4"
     },
     "eslintConfig": {
