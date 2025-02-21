@@ -1,6 +1,11 @@
+const fetch = require('node-fetch');
+const PrototypicalNetwork = require('./prototypicalNetwork');
+const msgpack = require('msgpack-lite');
+require('dotenv').config();
+
 class SamplingStrategy {
-    constructor(audioFiles) {
-        this.audioFiles = audioFiles;
+    constructor(audioFileNames) {
+        this.audioFileNames = audioFileNames;
     }
 
     sample() {
@@ -9,34 +14,68 @@ class SamplingStrategy {
 }
 
 class RandomSamplingStrategy extends SamplingStrategy {
-    constructor(audioFiles, batchSize) {
-        super(audioFiles);
+    constructor(audioFileNames, batchSize) {
+        super(audioFileNames);
         this.batchSize = batchSize;
     }
 
     sample() {
-        const shuffled = this.audioFiles.sort(() => 0.5 - Math.random());
+        const shuffled = this.audioFileNames.sort(() => 0.5 - Math.random());
         console.log('random sampling');
         return shuffled.slice(0, this.batchSize);
     }
 }
 
 class UncertaintyBasedSamplingStrategy extends SamplingStrategy {
-    constructor(audioFiles, batchSize, prototypes) {
-        super(audioFiles);
+    constructor(audioFileNames, batchSize, prototypes) {
+        super(audioFileNames);
         this.batchSize = batchSize;
+        this.prototypes = prototypes;
+        this.protoNet = new PrototypicalNetwork(prototypes.presence_prototype, prototypes.absence_prototype);
     }
 
-    // TODO: Now I just need to implement the sample() method. 
-    // I should probably implement a shared ProtoNet module that is used by both the backend and frontend, or I do everything in the backend.
-    // Computing the segments has the advantage that I do not need to send the embeddings to the frontend, which is a good thing.
-    // I can just send the audio file and the segment start and end times for the different labeling strategies. This makes a lot of sense.
-    // However, it does require the backend to do some more work. I think I will go with this approach.
+    async sample() {
+        const filesWithUncertainty = [];
 
-    sample() {
-        const shuffled = this.audioFiles.sort(() => 0.5 - Math.random());
-        console.log('uncertainty based sampling');
-        return shuffled.slice(0, this.batchSize);
+        for (const filename of this.audioFileNames) {
+            console.log("Inspecting filename object:", filename);
+
+            try {
+                const embeddings_path = `/data/${process.env.DATASET_NAME}/embeddings/${filename}.birdnet.embeddings.msgpack`
+                const embeddingsResponse = await fetch(`http://localhost:5000${embeddings_path}`); // Assuming your server is also running on localhost:5000 for backend calls
+                if (!embeddingsResponse.ok) {
+                    console.error(`Failed to fetch embeddings for ${filename}: ${embeddingsResponse.status} ${embeddingsResponse.statusText}`);
+                    continue; // Skip to the next file if fetching embeddings fails
+                }
+                const embeddingsBuffer = await embeddingsResponse.arrayBuffer();
+                const embeddingsData = msgpack.decode(new Uint8Array(embeddingsBuffer));
+                const embeddings = embeddingsData.embeddings; // Assuming embeddings are under 'embeddings' key
+
+                if (!embeddings || embeddings.length === 0) {
+                    console.warn(`No embeddings found for ${filename}, skipping for uncertainty calculation.`);
+                    continue; // Skip if no embeddings are found
+                }
+
+                const probabilities = this.protoNet.predict(embeddings);
+
+                // Calculate average entropy as uncertainty score using ProtoNet's entropy method
+                const entropies = this.protoNet.entropy(probabilities);
+                const averageEntropy = entropies.reduce((sum, entropy) => sum + entropy, 0) / entropies.length;
+
+                filesWithUncertainty.push({ filename, uncertainty: averageEntropy });
+
+            } catch (error) {
+                console.error(`Error processing embeddings for ${filename}:`, error);
+                // Consider how to handle errors - skip file, or fail the whole batch? For now, skip file.
+            }
+        }
+
+        // Sort files by uncertainty in descending order (higher uncertainty first)
+        filesWithUncertainty.sort((a, b) => b.uncertainty - a.uncertainty);
+
+        const bestFiles = filesWithUncertainty.slice(0, this.batchSize).map(item => item.filename); // Just return filenames
+        console.log('uncertainty based sampling - implemented');
+        return bestFiles;
     }
 }
 
