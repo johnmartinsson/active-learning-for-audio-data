@@ -2,7 +2,7 @@ const fetch = require('node-fetch');
 const path = require('path');
 const fs = require('fs');
 const msgpack = require('msgpack-lite');
-const { RandomSamplingStrategy, UncertaintyBasedSamplingStrategy } = require('../models/samplingStrategy');
+const { RandomSamplingStrategy, UncertaintySamplingStrategy, CertaintySamplingStrategy, HighProbabilitySamplingStrategy } = require('../models/samplingStrategy');
 require('dotenv').config();
 
 const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, process.env.METADATA_FILE);
@@ -22,50 +22,78 @@ const getUnlabeledFileNames = () => {
     return allFileNames.filter(file => !labeledFileNames.includes(file));
 };
 
-const getBatch = async (req, res) => { // Make getBatch async
-    // Read from JSON body instead of query
+const getBatch = async (req, res) => {
+    // 1) Parse inputs
     const { strategy = 'random', batchSize = 1 } = req.body;
-
-    // e.g. get the list of unlabeled files
     const unlabeledFiles = getUnlabeledFileNames();
-
-    // Decide how to pick
-    let sampledFiles;
-    if (strategy === 'uncertainty') {
-        try {
-            const prototypesResponse = await fetch('http://localhost:5000/api/audio/prototypes'); // Fetch prototypes from your API endpoint
-            if (!prototypesResponse.ok) {
-                console.error(`Failed to fetch prototypes: ${prototypesResponse.status} ${prototypesResponse.statusText}`);
-                return res.status(500).json({ message: 'Failed to fetch prototypes for uncertainty sampling' }); // Return error response
-            }
-            const prototypes = await prototypesResponse.json();
-            const strategyObj = new UncertaintyBasedSamplingStrategy(unlabeledFiles, batchSize, prototypes);
-            sampledFiles = await strategyObj.sample(); // Await the async sample method
-            console.log('sampledFiles (uncertainty):', sampledFiles);
-        } catch (error) {
-            console.error('Error fetching prototypes or during uncertainty sampling:', error);
-            return res.status(500).json({ message: 'Error during uncertainty sampling' }); // Return error response
-        }
-    } else {
+    console.log('strategy:', strategy);
+    console.log('batchSize:', batchSize);
+  
+    // 2) Decide which strategy class to use, and whether prototypes are needed
+    let StrategyClass;
+    let needsPrototypes = false;
+  
+    switch (strategy) {
+      case 'uncertainty':
+        StrategyClass = UncertaintySamplingStrategy;
+        needsPrototypes = true;
+        break;
+      case 'certainty':
+        StrategyClass = CertaintySamplingStrategy;
+        needsPrototypes = true;
+        break;
+      case 'high_probability':
+        StrategyClass = HighProbabilitySamplingStrategy;
+        needsPrototypes = true;
+        break;
+      default:
         // random fallback
-        const strategyObj = new RandomSamplingStrategy(unlabeledFiles, batchSize);
-        sampledFiles = strategyObj.sample();
-        console.log('sampledFiles (random):', sampledFiles);
+        StrategyClass = RandomSamplingStrategy;
+        needsPrototypes = false;
+        break;
     }
-
-    // Build response like usual
-    const batch = sampledFiles.map((filename) => ({
+  
+    // 3) Fetch prototypes only if required, then sample
+    try {
+      let prototypes;
+      if (needsPrototypes) {
+        const prototypesResponse = await fetch('http://localhost:5000/api/audio/prototypes');
+        if (!prototypesResponse.ok) {
+          console.error(`Failed to fetch prototypes: ${prototypesResponse.status} ${prototypesResponse.statusText}`);
+          return res
+            .status(500)
+            .json({ message: `Failed to fetch prototypes for ${strategy} sampling` });
+        }
+        prototypes = await prototypesResponse.json();
+      }
+  
+      let sampledFiles;
+      if (needsPrototypes) {
+        const strategyObj = new StrategyClass(unlabeledFiles, batchSize, prototypes);
+        sampledFiles = await strategyObj.sample();
+      } else {
+        const strategyObj = new StrategyClass(unlabeledFiles, batchSize);
+        sampledFiles = strategyObj.sample();
+      }
+      console.log(`sampledFiles (${strategy}):`, sampledFiles);
+  
+      // 4) Build response
+      const batch = sampledFiles.map((filename) => ({
         filename,
         audio_length: metadata.files.audio_lengths[`${filename}.wav`],
         audio_path: `/data/${process.env.DATASET_NAME}/audio/${filename}.wav`,
         spectrogram_path: `/data/${process.env.DATASET_NAME}/spectrograms/${filename}.png`,
         embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${filename}.birdnet.embeddings.msgpack`
-    }));
-
-    // Return JSON
-    res.status(200).json({ batch });
-};
-
+      }));
+  
+      // 5) Return JSON
+      res.status(200).json({ batch });
+    } catch (error) {
+      console.error(`Error fetching prototypes or during ${strategy} sampling:`, error);
+      return res.status(500).json({ message: `Error during ${strategy} sampling` });
+    }
+  };
+  
 const submitLabels = (req, res) => {
     const { filename, labels } = req.body;
 
