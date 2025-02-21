@@ -19,21 +19,19 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
   useEffect(() => {
     const fetchSegments = async () => {
       try {
-        const response = await fetch('http://localhost:5000/api/audio/segments', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            filename: file.filename,
-            labelingStrategyChoice,
-            numSegments
-          })
+        // e.g. GET /api/audio/myfile/segments?labelingStrategyChoice=active&numSegments=10
+        const url = new URL(`http://localhost:5000/api/audio/${file.filename}/segments`);
+        url.searchParams.set('labelingStrategyChoice', labelingStrategyChoice);
+        url.searchParams.set('numSegments', numSegments.toString());
+
+        const response = await fetch(url, {
+          method: 'GET'
         });
         if (!response.ok) {
           throw new Error(`Failed to fetch segments: ${response.statusText}`);
         }
         const data = await response.json();
 
-        // data.segments, data.suggestedLabels, data.probabilities, data.timings
         setSegments(data.segments || []);
         setLabels(data.suggestedLabels || []);
         setProbabilities(data.probabilities || []);
@@ -51,7 +49,7 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
   };
 
   const toggleLabel = (time) => {
-    // Example: flip the label in whichever segment the user clicked
+    // Flip the label in whichever segment the user clicked
     const updatedLabels = labels.map((label, i) => {
       const seg = segments[i];
       if (time >= seg.start && time < seg.end) {
@@ -70,11 +68,11 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
     }));
 
     try {
-      const response = await fetch('http://localhost:5000/api/audio/submit_labels', {
+      // e.g. POST /api/audio/myfile/labels
+      const response = await fetch(`http://localhost:5000/api/audio/${file.filename}/labels`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          filename: file.filename,
           labels: data
         }),
       });
@@ -83,7 +81,6 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
       if (response.ok) {
         console.log('Labels submitted successfully:', result.message);
         onLabelsSubmitted();
-        // reset if you wish
         setIsPlaying(false);
         setCurrentTime(0);
       } else {
@@ -121,8 +118,12 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
           duration={file.audio_length}
         />
       </div>
-      <button onClick={handlePlayPause}>{isPlaying ? 'Pause' : 'Play'}</button>
-      <button onClick={handleSubmit}>Submit Labels</button>
+      <button onClick={handlePlayPause}>
+        {isPlaying ? 'Pause' : 'Play'}
+      </button>
+      <button onClick={handleSubmit}>
+        Submit Labels
+      </button>
     </div>
   );
 };

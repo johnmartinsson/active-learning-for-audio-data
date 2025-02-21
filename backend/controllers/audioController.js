@@ -10,6 +10,92 @@ require('dotenv').config();
 const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, process.env.METADATA_FILE);
 const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
 
+// At the top of audioController.js, or put this in a separate utils file
+const computePrototypes = () => {
+  const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
+  const embeddingsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'embeddings');
+
+  let presence_embeddings = [];
+  let absence_embeddings = [];
+
+  // If labelsDir doesn’t exist or is empty, return random prototypes
+  if (!fs.existsSync(labelsDir)) {
+    // Return random prototypes if there's no labels directory
+    const randomPrototype = () => Array.from({ length: 1024 }, () => Math.random());
+    return {
+      presence_prototype: randomPrototype(),
+      absence_prototype: randomPrototype(),
+    };
+  }
+
+  const files = fs.readdirSync(labelsDir);
+
+  if (files.length === 0) {
+    // Return random prototypes if there are no labeled files
+    const randomPrototype = () => Array.from({ length: 1024 }, () => Math.random());
+    return {
+      presence_prototype: randomPrototype(),
+      absence_prototype: randomPrototype(),
+    };
+  }
+
+  // Gather presence and absence embeddings from all labeled files
+  files.forEach((file) => {
+    const labelPath = path.join(labelsDir, file);
+    const embeddingsPath = path.join(embeddingsDir, `${path.parse(file).name}.birdnet.embeddings.msgpack`);
+
+    if (!fs.existsSync(embeddingsPath)) {
+      return; // skip if no embeddings file
+    }
+
+    const labelLines = fs.readFileSync(labelPath, 'utf8')
+      .split('\n')
+      .slice(1) // skip header
+      .filter((line) => line.trim().length > 0);
+
+    const data = fs.readFileSync(embeddingsPath);
+    const embeddingsData = msgpack.decode(data);
+    const { timings, embeddings } = embeddingsData;
+
+    labelLines.forEach((line) => {
+      const [start_time, end_time, label] = line.split(',');
+      const st = parseFloat(start_time);
+      const et = parseFloat(end_time);
+      // For each labeled region, find embeddings whose center is in [st, et]
+      timings.forEach((timing, index) => {
+        const timingCenter = (timing[0] + timing[1]) / 2;
+        if (timingCenter >= st && timingCenter <= et) {
+          if (label === 'presence') {
+            presence_embeddings.push(embeddings[index]);
+          } else if (label === 'absence') {
+            absence_embeddings.push(embeddings[index]);
+          }
+        }
+      });
+    });
+  });
+
+  // If we have any embeddings, compute their average. Otherwise, return random prototypes.
+  const average = (vectors) => {
+    if (vectors.length === 0) {
+      return Array.from({ length: 1024 }, () => Math.random());
+    }
+    const dim = vectors[0].length;
+    const sum = new Array(dim).fill(0);
+    vectors.forEach((vec) => {
+      for (let i = 0; i < dim; i++) {
+        sum[i] += vec[i];
+      }
+    });
+    return sum.map((val) => val / vectors.length);
+  };
+
+  const presence_prototype = average(presence_embeddings);
+  const absence_prototype = average(absence_embeddings);
+
+  return { presence_prototype, absence_prototype };
+};
+
 const getLabeledFileNames = () => {
     const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
     if (!fs.existsSync(labelsDir)) {
@@ -26,7 +112,13 @@ const getUnlabeledFileNames = () => {
 
 const getSegments = async (req, res) => {
     try {
-      const { filename, labelingStrategyChoice, numSegments } = req.body;
+      // 1) read from route param
+      const { filename } = req.params;
+
+      // 2) read from query string for "labelingStrategyChoice" and "numSegments"
+      const labelingStrategyChoice = req.query.labelingStrategyChoice || 'fixed';
+      const numSegments = parseInt(req.query.numSegments, 10) || 10;
+
       const fileBase = path.parse(filename).name;
       const audioLength = metadata.files.audio_lengths[`${fileBase}.wav`];
   
@@ -68,11 +160,8 @@ const getSegments = async (req, res) => {
       const { embeddings, timings } = embeddingsData;
   
       // 2) Fetch prototypes
-      const prototypesResponse = await fetch('http://localhost:5000/api/audio/prototypes');
-      if (!prototypesResponse.ok) {
-        return res.status(500).json({ message: 'Failed to fetch prototypes' });
-      }
-      const { presence_prototype, absence_prototype } = await prototypesResponse.json();
+      const { presence_prototype, absence_prototype } = computePrototypes();
+
   
       // 3) Predict probabilities
       const net = new PrototypicalNetwork(presence_prototype, absence_prototype);
@@ -128,49 +217,44 @@ const getSegments = async (req, res) => {
     }
   };
 
-const getBatch = async (req, res) => {
-    // 1) Parse inputs
-    const { strategy = 'random', batchSize = 1 } = req.body;
-    const unlabeledFiles = getUnlabeledFileNames();
-    console.log('strategy:', strategy);
-    console.log('batchSize:', batchSize);
-  
-    // 2) Decide which strategy class to use, and whether prototypes are needed
-    let StrategyClass;
-    let needsPrototypes = false;
-  
-    switch (strategy) {
-      case 'uncertainty':
-        StrategyClass = UncertaintySamplingStrategy;
-        needsPrototypes = true;
-        break;
-      case 'certainty':
-        StrategyClass = CertaintySamplingStrategy;
-        needsPrototypes = true;
-        break;
-      case 'high_probability':
-        StrategyClass = HighProbabilitySamplingStrategy;
-        needsPrototypes = true;
-        break;
-      default:
-        // random fallback
-        StrategyClass = RandomSamplingStrategy;
-        needsPrototypes = false;
-        break;
-    }
-  
-    // 3) Fetch prototypes only if required, then sample
+  const getBatch = async (req, res) => {
     try {
+      // 1) Parse inputs from query params instead of the request body
+      const strategy = req.query.strategy || 'random';
+      const batchSize = parseInt(req.query.batchSize, 10) || 1;
+      const unlabeledFiles = getUnlabeledFileNames();
+  
+      console.log('strategy:', strategy);
+      console.log('batchSize:', batchSize);
+  
+      // 2) Decide which strategy class to use, and whether prototypes are needed
+      let StrategyClass;
+      let needsPrototypes = false;
+  
+      switch (strategy) {
+        case 'uncertainty':
+          StrategyClass = UncertaintySamplingStrategy;
+          needsPrototypes = true;
+          break;
+        case 'certainty':
+          StrategyClass = CertaintySamplingStrategy;
+          needsPrototypes = true;
+          break;
+        case 'high_probability':
+          StrategyClass = HighProbabilitySamplingStrategy;
+          needsPrototypes = true;
+          break;
+        default:
+          // random fallback
+          StrategyClass = RandomSamplingStrategy;
+          needsPrototypes = false;
+          break;
+      }
+  
+      // 3) Fetch prototypes only if required, then sample
       let prototypes;
       if (needsPrototypes) {
-        const prototypesResponse = await fetch('http://localhost:5000/api/audio/prototypes');
-        if (!prototypesResponse.ok) {
-          console.error(`Failed to fetch prototypes: ${prototypesResponse.status} ${prototypesResponse.statusText}`);
-          return res
-            .status(500)
-            .json({ message: `Failed to fetch prototypes for ${strategy} sampling` });
-        }
-        prototypes = await prototypesResponse.json();
+        prototypes = computePrototypes();
       }
   
       let sampledFiles;
@@ -195,13 +279,15 @@ const getBatch = async (req, res) => {
       // 5) Return JSON
       res.status(200).json({ batch });
     } catch (error) {
-      console.error(`Error fetching prototypes or during ${strategy} sampling:`, error);
-      return res.status(500).json({ message: `Error during ${strategy} sampling` });
+      console.error(`Error fetching prototypes or during ${req.query.strategy || 'random'} sampling:`, error);
+      return res.status(500).json({ message: `Error during batch retrieval` });
     }
   };
   
+  
 const submitLabels = (req, res) => {
-    const { filename, labels } = req.body;
+    const filename = req.params.filename;
+    const { labels } = req.body;
 
     const outputDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
     if (!fs.existsSync(outputDir)) {
@@ -324,4 +410,4 @@ const getPrototypes = (req, res) => {
     });
 };
 
-module.exports = { getBatch, submitLabels, getPrototypes, getLabeledFileNames, getUnlabeledFileNames, getSegments };
+module.exports = { getBatch, submitLabels, getLabeledFileNames, getUnlabeledFileNames, getSegments };

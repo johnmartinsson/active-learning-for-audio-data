@@ -1,3 +1,4 @@
+// ./frontend/src/App.js
 import React, { useState, useEffect, useCallback } from 'react';
 import AnnotationTool from './components/AnnotationTool';
 import './styles.css';
@@ -31,7 +32,6 @@ const App = () => {
         setNumSegments(parsedState.numSegments);
       }
     }
-    // If nothing is in localStorage, just keep default values
   }, []);
 
   // Use callback for saving to localStorage
@@ -46,14 +46,14 @@ const App = () => {
   }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments]);
 
   // 2) fetchBatch depends on sampleStrategyChoice, batchSize, etc.
+  //    Now using GET with query params
   const fetchBatch = useCallback(() => {
-    fetch('http://localhost:5000/api/audio/batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        strategy: sampleStrategyChoice,
-        batchSize: batchSize,
-      }),
+    const url = new URL('http://localhost:5000/api/audio/batch');
+    url.searchParams.set('strategy', sampleStrategyChoice);
+    url.searchParams.set('batchSize', batchSize.toString());
+
+    fetch(url, {
+      method: 'GET'
     })
       .then(response => response.json())
       .then(data => {

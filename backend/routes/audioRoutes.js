@@ -2,20 +2,22 @@
 const express = require('express');
 const {
   getBatch,
-  submitLabels,
-  getPrototypes,
-  getSegments
+  getSegments,
+  submitLabels
 } = require('../controllers/audioController');
 
 const router = express.Router();
 
-// Getters
+// Return a new batch of unlabeled files
+// e.g. GET /audio/batch?strategy=random&batchSize=5
 router.get('/batch', getBatch);
-router.get('/prototypes', getPrototypes);
-router.post('/batch', getBatch);
-router.post('/segments', getSegments);
 
-// Setters
-router.post('/submit_labels', submitLabels);
+// Return computed segments for a given file
+// e.g. GET /audio/myfile/segments?labelingStrategyChoice=active&numSegments=10
+router.get('/:filename/segments', getSegments);
+
+// Submit labels for a given file
+// e.g. POST /audio/myfile/labels
+router.post('/:filename/labels', submitLabels);
 
 module.exports = router;
