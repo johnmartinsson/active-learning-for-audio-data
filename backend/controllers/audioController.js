@@ -1,3 +1,4 @@
+const fetch = require('node-fetch');
 const path = require('path');
 const fs = require('fs');
 const msgpack = require('msgpack-lite');
@@ -7,7 +8,7 @@ require('dotenv').config();
 const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, process.env.METADATA_FILE);
 const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
 
-const getLabeledFiles = () => {
+const getLabeledFileNames = () => {
     const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
     if (!fs.existsSync(labelsDir)) {
         return [];
@@ -15,62 +16,55 @@ const getLabeledFiles = () => {
     return fs.readdirSync(labelsDir).map(file => path.parse(file).name);
 };
 
-const getUnlabeledFiles = () => {
-    const labeledFiles = getLabeledFiles();
-    const allFiles = metadata.files.audio_files.map(file => path.parse(file).name);
-    return allFiles.filter(file => !labeledFiles.includes(file));
+const getUnlabeledFileNames = () => {
+    const labeledFileNames = getLabeledFileNames();
+    const allFileNames = metadata.files.audio_files.map(file => path.parse(file).name);
+    return allFileNames.filter(file => !labeledFileNames.includes(file));
 };
 
-// const getBatch = (req, res) => {
-//     const unlabeledFiles = getUnlabeledFiles();
-//     const strategy = new RandomSamplingStrategy(unlabeledFiles, 1);
-//     const sampledFiles = strategy.sample();
-//     const batch = sampledFiles.map(file => ({
-//         filename: file,
-//         audio_length: metadata.files.audio_lengths[`${file}.wav`],
-//         audio_path: `/data/${process.env.DATASET_NAME}/audio/${file}.wav`,
-//         spectrogram_path: `/data/${process.env.DATASET_NAME}/spectrograms/${file}.png`,
-//         embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${file}.birdnet.embeddings.msgpack`
-//     }));
-//     res.status(200).json({ batch });
-// };
-
-
-const getBatch = (req, res) => {
+const getBatch = async (req, res) => { // Make getBatch async
     // Read from JSON body instead of query
     const { strategy = 'random', batchSize = 1 } = req.body;
-  
+
     // e.g. get the list of unlabeled files
-    const unlabeledFiles = getUnlabeledFiles();
-  
+    const unlabeledFiles = getUnlabeledFileNames();
+
     // Decide how to pick
     let sampledFiles;
     if (strategy === 'uncertainty') {
-      // assume you have prototypes
-      const prototypes = { /* presence_prototype, absence_prototype, etc. */ };
-      const strategyObj = new UncertaintyBasedSamplingStrategy(unlabeledFiles, batchSize, prototypes);
-      sampledFiles = strategyObj.sample();
-      console.log('sampledFiles:', sampledFiles);
+        try {
+            const prototypesResponse = await fetch('http://localhost:5000/api/audio/prototypes'); // Fetch prototypes from your API endpoint
+            if (!prototypesResponse.ok) {
+                console.error(`Failed to fetch prototypes: ${prototypesResponse.status} ${prototypesResponse.statusText}`);
+                return res.status(500).json({ message: 'Failed to fetch prototypes for uncertainty sampling' }); // Return error response
+            }
+            const prototypes = await prototypesResponse.json();
+            const strategyObj = new UncertaintyBasedSamplingStrategy(unlabeledFiles, batchSize, prototypes);
+            sampledFiles = await strategyObj.sample(); // Await the async sample method
+            console.log('sampledFiles (uncertainty):', sampledFiles);
+        } catch (error) {
+            console.error('Error fetching prototypes or during uncertainty sampling:', error);
+            return res.status(500).json({ message: 'Error during uncertainty sampling' }); // Return error response
+        }
     } else {
-      // random fallback
-      const strategyObj = new RandomSamplingStrategy(unlabeledFiles, batchSize);
-      sampledFiles = strategyObj.sample();
-      console.log('sampledFiles:', sampledFiles);
+        // random fallback
+        const strategyObj = new RandomSamplingStrategy(unlabeledFiles, batchSize);
+        sampledFiles = strategyObj.sample();
+        console.log('sampledFiles (random):', sampledFiles);
     }
-  
+
     // Build response like usual
     const batch = sampledFiles.map((filename) => ({
-      filename,
-      audio_length: metadata.files.audio_lengths[`${filename}.wav`],
-      audio_path: `/data/${process.env.DATASET_NAME}/audio/${filename}.wav`,
-      spectrogram_path: `/data/${process.env.DATASET_NAME}/spectrograms/${filename}.png`,
-      embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${filename}.birdnet.embeddings.msgpack`
+        filename,
+        audio_length: metadata.files.audio_lengths[`${filename}.wav`],
+        audio_path: `/data/${process.env.DATASET_NAME}/audio/${filename}.wav`,
+        spectrogram_path: `/data/${process.env.DATASET_NAME}/spectrograms/${filename}.png`,
+        embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${filename}.birdnet.embeddings.msgpack`
     }));
-  
+
     // Return JSON
     res.status(200).json({ batch });
-  };
-  
+};
 
 const submitLabels = (req, res) => {
     const { filename, labels } = req.body;
@@ -196,4 +190,4 @@ const getPrototypes = (req, res) => {
     });
 };
 
-module.exports = { getBatch, submitLabels, getPrototypes, getLabeledFiles, getUnlabeledFiles };
+module.exports = { getBatch, submitLabels, getPrototypes, getLabeledFileNames, getUnlabeledFileNames };
