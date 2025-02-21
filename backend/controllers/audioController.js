@@ -1,8 +1,10 @@
+// ./backend/controllers/audioController.js
 const fetch = require('node-fetch');
 const path = require('path');
 const fs = require('fs');
 const msgpack = require('msgpack-lite');
 const { RandomSamplingStrategy, UncertaintySamplingStrategy, CertaintySamplingStrategy, HighProbabilitySamplingStrategy } = require('../models/samplingStrategy');
+const PrototypicalNetwork = require('../models/prototypicalNetwork');
 require('dotenv').config();
 
 const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, process.env.METADATA_FILE);
@@ -21,6 +23,110 @@ const getUnlabeledFileNames = () => {
     const allFileNames = metadata.files.audio_files.map(file => path.parse(file).name);
     return allFileNames.filter(file => !labeledFileNames.includes(file));
 };
+
+const getSegments = async (req, res) => {
+    try {
+      const { filename, labelingStrategyChoice, numSegments } = req.body;
+      const fileBase = path.parse(filename).name;
+      const audioLength = metadata.files.audio_lengths[`${fileBase}.wav`];
+  
+      // Helper for checking bimodality
+      function isBiModal(probabilities) {
+        const lowThreshold = 0.3;
+        const highThreshold = 0.7;
+        const lowCount = probabilities.filter(p => p <= lowThreshold).length;
+        const highCount = probabilities.filter(p => p >= highThreshold).length;
+        const totalCount = probabilities.length;
+        return (lowCount / totalCount > 0.1) && (highCount / totalCount > 0.1);
+      }
+  
+      if (labelingStrategyChoice === 'fixed') {
+        // ...existing fixed code...
+        const segmentLength = audioLength / numSegments;
+        const segments = [];
+        for (let i = 0; i < numSegments; i++) {
+          segments.push({ start: i * segmentLength, end: (i + 1) * segmentLength });
+        }
+        const suggestedLabels = Array(numSegments).fill('absence');
+        return res.status(200).json({
+          segments,
+          probabilities: [],
+          timings: [],
+          suggestedLabels
+        });
+      }
+  
+      // 1) Load embeddings
+      const embeddingsPath = path.join(
+        process.env.DATA_DIR,
+        process.env.DATASET_NAME,
+        'embeddings',
+        `${fileBase}.birdnet.embeddings.msgpack`
+      );
+      const buffer = fs.readFileSync(embeddingsPath);
+      const embeddingsData = msgpack.decode(buffer);
+      const { embeddings, timings } = embeddingsData;
+  
+      // 2) Fetch prototypes
+      const prototypesResponse = await fetch('http://localhost:5000/api/audio/prototypes');
+      if (!prototypesResponse.ok) {
+        return res.status(500).json({ message: 'Failed to fetch prototypes' });
+      }
+      const { presence_prototype, absence_prototype } = await prototypesResponse.json();
+  
+      // 3) Predict probabilities
+      const net = new PrototypicalNetwork(presence_prototype, absence_prototype);
+      const probabilities = net.predict(embeddings);  // array of presence probabilities [0..1]
+  
+      // 4) Detect change points for adaptive segmentation
+      const gradients = probabilities.slice(1)
+        .map((prob, idx) => Math.abs(prob - probabilities[idx]));
+      const changePoints = gradients
+        .map((g, idx) => ({ grad: g, index: idx }))
+        .sort((a, b) => b.grad - a.grad)
+        .slice(0, numSegments - 1)
+        .map(item => item.index + 1)
+        .sort((a, b) => a - b);
+  
+      const segments = [];
+      let start = 0;
+      changePoints.forEach(point => {
+        // pick a middle-of-frame time for splitting
+        const splitTime = (timings[point][0] + timings[point][1]) / 2;
+        segments.push({ start, end: splitTime });
+        start = splitTime;
+      });
+      segments.push({ start, end: audioLength });
+  
+      // 5) Generate suggested labels
+      //    By default, do presence if any probability > 0.5 in that segment
+      let suggestedLabels = segments.map(segment => {
+        const hasPresence = timings.some((time, idx) => {
+          const center = (time[0] + time[1]) / 2;
+          return center >= segment.start && center < segment.end && probabilities[idx] > 0.5;
+        });
+        return hasPresence ? 'presence' : 'absence';
+      });
+  
+      // *** Bimodality check *** 
+      const bimodal = isBiModal(probabilities);
+      if (!bimodal) {
+        // If not bimodal, override everything to absence
+        suggestedLabels = suggestedLabels.map(() => 'absence');
+      }
+  
+      // 6) Return results
+      return res.status(200).json({
+        segments,
+        probabilities,
+        timings: timings.map(t => (t[0] + t[1]) / 2),
+        suggestedLabels
+      });
+    } catch (error) {
+      console.error('Error in getSegments:', error);
+      return res.status(500).json({ message: 'Failed to compute segments' });
+    }
+  };
 
 const getBatch = async (req, res) => {
     // 1) Parse inputs
@@ -218,4 +324,4 @@ const getPrototypes = (req, res) => {
     });
 };
 
-module.exports = { getBatch, submitLabels, getPrototypes, getLabeledFileNames, getUnlabeledFileNames };
+module.exports = { getBatch, submitLabels, getPrototypes, getLabeledFileNames, getUnlabeledFileNames, getSegments };
