@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const msgpack = require('msgpack-lite');
-const { RandomSamplingStrategy } = require('../models/samplingStrategy');
+const { RandomSamplingStrategy, UncertaintyBasedSamplingStrategy } = require('../models/samplingStrategy');
 require('dotenv').config();
 
 const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, process.env.METADATA_FILE);
@@ -21,19 +21,56 @@ const getUnlabeledFiles = () => {
     return allFiles.filter(file => !labeledFiles.includes(file));
 };
 
+// const getBatch = (req, res) => {
+//     const unlabeledFiles = getUnlabeledFiles();
+//     const strategy = new RandomSamplingStrategy(unlabeledFiles, 1);
+//     const sampledFiles = strategy.sample();
+//     const batch = sampledFiles.map(file => ({
+//         filename: file,
+//         audio_length: metadata.files.audio_lengths[`${file}.wav`],
+//         audio_path: `/data/${process.env.DATASET_NAME}/audio/${file}.wav`,
+//         spectrogram_path: `/data/${process.env.DATASET_NAME}/spectrograms/${file}.png`,
+//         embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${file}.birdnet.embeddings.msgpack`
+//     }));
+//     res.status(200).json({ batch });
+// };
+
+
 const getBatch = (req, res) => {
+    // Read from JSON body instead of query
+    const { strategy = 'random', batchSize = 1 } = req.body;
+  
+    // e.g. get the list of unlabeled files
     const unlabeledFiles = getUnlabeledFiles();
-    const strategy = new RandomSamplingStrategy(unlabeledFiles, 1);
-    const sampledFiles = strategy.sample();
-    const batch = sampledFiles.map(file => ({
-        filename: file,
-        audio_length: metadata.files.audio_lengths[`${file}.wav`],
-        audio_path: `/data/${process.env.DATASET_NAME}/audio/${file}.wav`,
-        spectrogram_path: `/data/${process.env.DATASET_NAME}/spectrograms/${file}.png`,
-        embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${file}.birdnet.embeddings.msgpack`
+  
+    // Decide how to pick
+    let sampledFiles;
+    if (strategy === 'uncertainty') {
+      // assume you have prototypes
+      const prototypes = { /* presence_prototype, absence_prototype, etc. */ };
+      const strategyObj = new UncertaintyBasedSamplingStrategy(unlabeledFiles, batchSize, prototypes);
+      sampledFiles = strategyObj.sample();
+      console.log('sampledFiles:', sampledFiles);
+    } else {
+      // random fallback
+      const strategyObj = new RandomSamplingStrategy(unlabeledFiles, batchSize);
+      sampledFiles = strategyObj.sample();
+      console.log('sampledFiles:', sampledFiles);
+    }
+  
+    // Build response like usual
+    const batch = sampledFiles.map((filename) => ({
+      filename,
+      audio_length: metadata.files.audio_lengths[`${filename}.wav`],
+      audio_path: `/data/${process.env.DATASET_NAME}/audio/${filename}.wav`,
+      spectrogram_path: `/data/${process.env.DATASET_NAME}/spectrograms/${filename}.png`,
+      embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${filename}.birdnet.embeddings.msgpack`
     }));
+  
+    // Return JSON
     res.status(200).json({ batch });
-};
+  };
+  
 
 const submitLabels = (req, res) => {
     const { filename, labels } = req.body;

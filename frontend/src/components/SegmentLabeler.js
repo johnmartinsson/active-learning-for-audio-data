@@ -89,68 +89,82 @@ class ActiveLabelingStrategy extends LabelingStrategy {
     }
 }
 
-const SegmentLabeler = ({ file, numSegments, setSegments, setLabels }) => {
+const SegmentLabeler = ({ file, numSegments, strategyChoice, setSegments, setLabels }) => {
     const [probabilities, setProbabilities] = useState([]);
-    const [segments, setLocalSegments] = useState([]);
     const [timings, setTimings] = useState([]);
 
     useEffect(() => {
+        // If using FixedLengthLabelingStrategy, we do NOT need prototypes or embeddings
+        if (strategyChoice === 'fixed') {
+            const strategy = new FixedLengthLabelingStrategy();
+            const segments = strategy.segment(file.audio_length, numSegments);
+            setSegments(segments);
+            // For instance, default them all to 'absence':
+            setLabels(new Array(numSegments).fill('absence'));
+            setProbabilities([]); 
+            setTimings([]);
+            return; // Done, so we can exit early
+        }
+
+        // Otherwise, use the existing ActiveLabelingStrategy
         const fetchEmbeddingsAndPrototypes = async () => {
             try {
                 const [embeddingsResponse, prototypesResponse] = await Promise.all([
                     fetch(`http://localhost:5000${file.embeddings_path}`),
                     fetch('http://localhost:5000/api/audio/prototypes')
                 ]);
-
+    
                 const embeddingsBuffer = await embeddingsResponse.arrayBuffer();
                 const embeddings = msgpack.decode(new Uint8Array(embeddingsBuffer));
-
+    
                 const prototypes = await prototypesResponse.json();
                 const { presence_prototype, absence_prototype } = prototypes;
-
-                // Use embeddings and prototypes to decide on how to segment the data
+    
                 const strategy = new ActiveLabelingStrategy(presence_prototype, absence_prototype);
                 const probabilities = strategy.predict(embeddings.embeddings);
-                const probabilities_timings = embeddings.timings;
-                // compute average timing for each embedding
-                const average_probabilities_timings = probabilities_timings.map(timing => (timing[0] + timing[1]) / 2);
-
-                setTimings(average_probabilities_timings);
-                const segments = strategy.segment(file.audio_length, numSegments, probabilities, average_probabilities_timings);
+                const probabilitiesTimings = embeddings.timings.map(
+                  timing => (timing[0] + timing[1]) / 2
+                );
+                setTimings(probabilitiesTimings);
+    
+                const segments = strategy.segment(file.audio_length, numSegments, probabilities, probabilitiesTimings);
                 setSegments(segments);
-
-                // Determine suggested labels for each segment
-                const suggested_segment_labels = segments.map(segment => {
-                    const hasPresence = average_probabilities_timings.some((time, index) => 
-                        time >= segment.start && time < segment.end && probabilities[index] > 0.5
-                    );
-                    return hasPresence ? 'presence' : 'absence';
+    
+                // Possibly compute labels from presence threshold
+                const suggestedLabels = segments.map(segment => {
+                  const hasPresence = probabilitiesTimings.some((time, index) =>
+                    time >= segment.start && time < segment.end && probabilities[index] > 0.5
+                  );
+                  return hasPresence ? 'presence' : 'absence';
                 });
-
-                // I think it would make sense to only suggest labels if the probabilities are bi-modal
-                // Otherwise they are not well separated, and the suggestions might not be accurate
-                // There are probably even better criterions for this, but this is a simple one
+    
+                // Check for bi-modality
                 const isBiModal = strategy.isBiModal(probabilities);
                 if (!isBiModal) {
                     setLabels(new Array(numSegments).fill('absence'));
+                } else {
+                    setLabels(suggestedLabels);
                 }
-                else {
-                    setLabels(suggested_segment_labels);
-                }
+    
                 setProbabilities(probabilities);
-                setLocalSegments(segments);
             } catch (error) {
-                console.error('Error fetching embeddings or prototypes:', error);
+                console.error('Error fetching embeddings/prototypes:', error);
             }
         };
-
+    
         fetchEmbeddingsAndPrototypes();
-    }, [file, numSegments, setSegments, setLabels]);
+    }, [file, numSegments, strategyChoice, setSegments, setLabels]);
 
     return (
         <div style={{ width: '100%' }}>
-            <ProbabilityChart probabilities={probabilities} timings={timings} audioLength={file.audio_length} />
-        </div>
+            {strategyChoice === 'active' && (
+            <ProbabilityChart
+                probabilities={probabilities}
+                timings={timings}
+                audioLength={file.audio_length}
+            />
+            )}
+      </div>
     );
 };
 

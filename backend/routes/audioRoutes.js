@@ -8,6 +8,7 @@ router.get('/batch', getBatch);
 router.get('/prototypes', getPrototypes);
 
 // post routes
+router.post('/batch', getBatch);
 router.post('/submit_labels', submitLabels);
 
 
