@@ -18,7 +18,7 @@ Create an environment for the BirdNET-Analyzer
 
 Run the data preparation script
 
-    python prepare_audio_data.py birdnet_analyzer/example/ <directory>/active-learning-for-audio-data/backend/data/example 
+    python prepare_audio_data.py birdnet_analyzer/example/ <directory>/active-learning-for-audio-data/data/example 
 
 where you set the <directory> to that where you cloned the 'active-learning-for-audio-data' repository. This will pre-process the data and create three different directories:
 
