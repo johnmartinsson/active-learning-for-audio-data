@@ -1,17 +1,6 @@
-# Active learning
+# How to use the Annotation Tool?
 
 
-## Active sampling
-
-## Active labeling
-
-# Embeddings
-
-- [ ] embed audio using https://github.com/bioacoustic-ai/bacpipe
-
-Collecting workspace information
-
-Sure, here is a summary of the project constraints for your audio labeling tool:
 
 # Project Guidelines
 
