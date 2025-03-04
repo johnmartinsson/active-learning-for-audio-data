@@ -53,7 +53,8 @@ For the example file, it should look like this:
 The node.js backend does run some python code, and this will setup the environment for that.
 
     cd <directory>/active-learning-for-audio-data/backend
-    conda create -n audio-labeling-test python==3.13
+    conda create -n audio-labeling python==3.13
+    conda activate audio-labeling
     pip install -r requirements.txt
 
 Next install the node.js dependencies and start the backend
