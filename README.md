@@ -68,7 +68,7 @@ Next install the node.js dependencies and start the backend
     npm install
     npm start
 
-# Project Guidelines
+# Development Guidelines
 
 1. **Backend and Frontend Separation**:
    - The backend is developed using Node.js.
