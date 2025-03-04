@@ -54,9 +54,9 @@ Sure, here is a summary of the project constraints for your audio labeling tool:
 10. **Modularity**:
     - The project should be designed in a modular way to allow for easy integration of new labeling strategies and machine learning models.
 
-These constraints should guide the development and deployment of your audio labeling tool, ensuring it is scalable, secure, and user-friendly.
+These constraints should guide the development and deployment of the audio labeling tool, ensuring it is scalable, secure, and user-friendly.
 
-### Example Architecture:
+## Example Architecture:
 ```
 +-------------------+       +-------------------+       +-------------------+
 |                   |       |                   |       |                   |
@@ -71,9 +71,9 @@ These constraints should guide the development and deployment of your audio labe
                                     |
                                     |
                                     |
-                            +-------------------+
-                            |                   |
-                            |   Cloud Storage   |
-                            |                   |
-                            +-------------------+
+                            +---------------------+
+                            |                     |
+                            | Cloud/Local Storage |
+                            |                     |
+                            +---------------------+
 ```
