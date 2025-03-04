@@ -1,14 +1,48 @@
 # How to use the Annotation Tool?
 
+Clone the annotation tool code
+
+   git clone https://github.com/johnmartinsson/active-learning-for-audio-data.git
+
 ## Prepare the Audio Data
+Clone a fork of the BitdNET-Analyzer
 
-## Starting the Backend
+   git clone https://github.com/johnmartinsson/BirdNET-Analyzer.git
 
-### Dependencies
+Create an environment for the BirdNET-Analyzer
 
-## Starting the Frontend
+   conda create -n birdnet
+   conda activate birdnet
+   pip install -r requirements.txt
 
-### Dependencies
+Run the data preparation script
+
+   python prepare_audio_data.py birdnet_analyzer/example/ <directory>/active-learning-for-audio-data/backend/data/example 
+
+where you set the directory to that where you cloned the repository. This will pre-process the data by
+
+- splitting audio into 30 second segments (audio),
+- pre-compute Mel spectrograms for each segment (spectrogram), and
+- pre-compute the BirdNET embeddings for each segment (embeddings).
+
+## Prepare the backend
+
+The node.js backend does run some python code, and this will setup the environment for that.
+
+   cd backend
+   conda create -n audio-labeling-test python=3.13
+   pip install -r requirements.txt
+
+Next install the node.js dependencies and start the backend
+
+   npm install
+   npm start
+
+## Prepare the frontend
+
+   cd frontend
+   npm install
+   npm start
 
 # Project Guidelines
 
