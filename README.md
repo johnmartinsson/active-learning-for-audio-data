@@ -11,26 +11,50 @@ Clone a fork of the BitdNET-Analyzer
 
 Create an environment for the BirdNET-Analyzer
 
-    conda create -n birdnet
+    cd BirdNET-Analyzer
+    conda create -n birdnet python==3.11
     conda activate birdnet
     pip install -r requirements.txt
 
 Run the data preparation script
 
-    python prepare_audio_data.py birdnet_analyzer/example/ <directory>/active-learning-for-audio-data/backend/data/example 
+    python prepare_audio_data.py birdnet_analyzer/example/ <directory>/active-learning-for-audio-data/data/example 
 
-where you set the <directory> to that where you cloned the 'active-learning-for-audio-data' repository. This will pre-process the data by
+where you set the <directory> to that where you cloned the 'active-learning-for-audio-data' repository. This will pre-process the data and create three different directories:
 
-- splitting audio into 30 second segments (audio),
-- pre-compute Mel spectrograms for each segment (spectrogram), and
-- pre-compute the BirdNET embeddings for each segment (embeddings).
+- audio: audio segments of maximum length 30 seconds,
+- specgrograms: pre-computed Mel spectrograms for each audio segment, and
+- embeddings: pre-computed BirdNET embeddings for each audio segment.
+
+For the example file, it should look like this:
+
+    ├── audio
+    │   ├── soundscape_segment_1.wav
+    │   ├── soundscape_segment_2.wav
+    │   ├── soundscape_segment_3.wav
+    │   └── soundscape_segment_4.wav
+    ├── embeddings
+    │   ├── soundscape_segment_1.birdnet.embeddings.msgpack
+    │   ├── soundscape_segment_2.birdnet.embeddings.msgpack
+    │   ├── soundscape_segment_3.birdnet.embeddings.msgpack
+    │   └── soundscape_segment_4.birdnet.embeddings.msgpack
+    ├── metadata.json
+    └── spectrograms
+        ├── soundscape_segment_1.png
+        ├── soundscape_segment_2.png
+        ├── soundscape_segment_3.png
+        └── soundscape_segment_4.png
+    
+    4 directories, 13 files
+
 
 ## Prepare the backend
 
 The node.js backend does run some python code, and this will setup the environment for that.
 
-    cd backend
-    conda create -n audio-labeling-test python=3.13
+    cd <directory>/active-learning-for-audio-data/backend
+    conda create -n audio-labeling python==3.13
+    conda activate audio-labeling
     pip install -r requirements.txt
 
 Next install the node.js dependencies and start the backend
@@ -40,7 +64,7 @@ Next install the node.js dependencies and start the backend
 
 ## Prepare the frontend
 
-    cd frontend
+    cd <directory>/active-learning-for-audio-data/backend
     npm install
     npm start
 
