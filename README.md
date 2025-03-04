@@ -1,6 +1,14 @@
 # How to use the Annotation Tool?
 
+## Prepare the Audio Data
 
+## Starting the Backend
+
+### Dependencies
+
+## Starting the Frontend
+
+### Dependencies
 
 # Project Guidelines
 
