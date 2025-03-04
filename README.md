@@ -2,6 +2,30 @@
 
 ![Illustrationg of the audio weak labeling interface. The user can select a sampling strategy and a labeling strategy, and then weakly label audio segments by indicating presence by clicking on them.](interface.png)
 
+A simple audio annotation interface. The user can select between different sampling and labeling strategies.
+
+## Sampling Strategies
+The currently implemented choices are:
+
+- Uncertainty Sampling: sample the audio recording next where the underlying model predictions has the highest average entropy,
+- Random Sampling: sample a random audio recording next,
+- Certainty Sampling: sample the audio recording next where the underlying model predictions has the lowest average entropy, and
+- High Probability Sampling: sample the audio recording next where the underlying model predictions has the highest average predicted presence probability.
+
+## Labeling Strategies
+
+- Fixed Segments: split the audio recording into fixed and equal length segments, and
+- Adapted Segments: use underlying model predictions to derive plausible segmentation based on change point detection.
+
+Each time the user clicks "Submit Labels" the labels are stored in the './data/example/labels' directory on the backend, and the underlying model is update with these labels to hopefully produce better label suggestions the next iteration.
+
+## Relevant Research
+
+- [The Accuracy Cost of Weak Labeling](https://johnmartinsson.org/publications/2025/the-accuracy-cost-of-weak-labeling): a theoretical study of the expected label accuracy of fixed length weak labeling.
+- [Adaptive Change-Point Detection](https://johnmartinsson.org/publications/2024/adaptive-change-point-detection): an emperical study of the benefits of adapted segments for weak labeling.
+
+Consider citing either of these works if you end up using this and find the research helpful/relevant.
+
 # How to use the Annotation Tool?
 
 Clone the annotation tool code
