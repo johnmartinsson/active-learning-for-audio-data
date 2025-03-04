@@ -19,7 +19,7 @@ The following sampling strategies are implemented:
 - **High Probability Sampling**: Selects the audio recording where the model predictions have the highest average predicted presence probability.
 
 ## Labeling Strategies
-Two labeling strategies are available:
+Two weak labeling strategies are available:
 
 - **Fixed Segments**: Splits the audio recording into equal-length segments.
 - **Adaptive Segments**: Uses model predictions to derive plausible segmentations based on change-point detection.
