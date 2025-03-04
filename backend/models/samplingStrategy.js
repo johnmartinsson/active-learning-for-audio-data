@@ -172,8 +172,8 @@ class HighProbabilitySamplingStrategy extends SamplingStrategy {
                 const averageProbability = probabilities.reduce((sum, prob) => sum + prob, 0) / probabilities.length;
 
                 // Debug print average entropy for each file
-                console.log(`Average probability for ${filename
-                }:`, averageProbability);
+                // console.log(`Average probability for ${filename
+                // }:`, averageProbability);
 
                 filesWithProbability.push({ filename, probability: averageProbability });
 

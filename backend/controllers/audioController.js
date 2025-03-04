@@ -3,6 +3,8 @@ const fetch = require('node-fetch');
 const path = require('path');
 const fs = require('fs');
 const msgpack = require('msgpack-lite');
+const { spawn } = require('child_process');
+
 const { RandomSamplingStrategy, UncertaintySamplingStrategy, CertaintySamplingStrategy, HighProbabilitySamplingStrategy } = require('../models/samplingStrategy');
 const PrototypicalNetwork = require('../models/prototypicalNetwork');
 require('dotenv').config();
@@ -43,7 +45,7 @@ const computePrototypes = () => {
   files.forEach((file) => {
     const labelPath = path.join(labelsDir, file);
     const embeddingsPath = path.join(embeddingsDir, `${path.parse(file).name}.birdnet.embeddings.msgpack`);
-    console.log('embeddingsPath:', embeddingsPath);
+    // console.log('embeddingsPath:', embeddingsPath);
 
     if (!fs.existsSync(embeddingsPath)) {
       return; // skip if no embeddings file
@@ -111,16 +113,83 @@ const getUnlabeledFileNames = () => {
     return allFileNames.filter(file => !labeledFileNames.includes(file));
 };
 
-const getSegments = async (req, res) => {
-    try {
-      // 1) read from route param
-      const { filename } = req.params;
+const detectChangePoints = (probabilities, numSegments) => {
+  return new Promise((resolve, reject) => {
+      const pythonProcess = spawn('python', ['scripts/change_point_detection.py']);
 
-      // 2) read from query string for "labelingStrategyChoice" and "numSegments"
+      const inputData = { probabilities, num_segments: numSegments };
+      // console.log("Sending input data:", inputData);  // Log input data to console
+
+      pythonProcess.stdin.write(JSON.stringify(inputData));
+      pythonProcess.stdin.end();
+
+      let data = '';
+      pythonProcess.stdout.on('data', (chunk) => {
+          data += chunk.toString();
+      });
+
+      pythonProcess.stderr.on('data', (chunk) => {
+          console.error(`Python error: ${chunk.toString()}`);
+      });
+
+      pythonProcess.on('close', (code) => {
+          if (code !== 0) {
+              return reject(new Error(`Python script exited with code ${code}`));
+          }
+          resolve(JSON.parse(data));
+      });
+  });
+};
+
+const getSegments = async (req, res) => {
+  try {
+      const { filename } = req.params;
       const labelingStrategyChoice = req.query.labelingStrategyChoice || 'fixed';
       const numSegments = parseInt(req.query.numSegments, 10) || 10;
       const audioLength = metadata.files.audio_lengths[`${filename}.wav`];
-  
+
+      if (labelingStrategyChoice === 'fixed') {
+          const segmentLength = audioLength / numSegments;
+          const segments = [];
+          for (let i = 0; i < numSegments; i++) {
+              segments.push({ start: i * segmentLength, end: (i + 1) * segmentLength });
+          }
+          const suggestedLabels = Array(numSegments).fill('absence');
+          return res.status(200).json({ segments, probabilities: [], timings: [], suggestedLabels });
+      }
+
+      const embeddingsPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'embeddings', `${filename}.birdnet.embeddings.msgpack`);
+      const buffer = fs.readFileSync(embeddingsPath);
+      const embeddingsData = msgpack.decode(buffer);
+      const { embeddings, timings } = embeddingsData;
+
+      const { presence_prototype, absence_prototype } = computePrototypes();
+      const net = new PrototypicalNetwork(presence_prototype, absence_prototype);
+      const probabilities = net.predict(embeddings);
+
+      const changePoints = await detectChangePoints(probabilities, numSegments);
+
+      const segments = [];
+      let start = 0;
+      changePoints.forEach(point => {
+          const splitTime = (timings[point][0] + timings[point][1]) / 2;
+          segments.push({ start, end: splitTime });
+          start = splitTime;
+      });
+      segments.push({ start, end: audioLength });
+
+      let suggestedLabels = segments.map(segment => {
+        const segmentProbabilities = timings
+            .map((time, idx) => {
+                const center = (time[0] + time[1]) / 2;
+                return center >= segment.start && center < segment.end ? probabilities[idx] : null;
+            })
+            .filter(prob => prob !== null);
+    
+        const averageProbability = segmentProbabilities.reduce((sum, prob) => sum + prob, 0) / segmentProbabilities.length;
+        return averageProbability >= 0.5 ? 'presence' : 'absence';
+      });
+
       // Helper for checking bimodality
       function isBiModal(probabilities) {
         const lowThreshold = 0.3;
@@ -130,160 +199,85 @@ const getSegments = async (req, res) => {
         const totalCount = probabilities.length;
         return (lowCount / totalCount > 0.1) && (highCount / totalCount > 0.1);
       }
-  
-      if (labelingStrategyChoice === 'fixed') {
-        // ...existing fixed code...
-        const segmentLength = audioLength / numSegments;
-        const segments = [];
-        for (let i = 0; i < numSegments; i++) {
-          segments.push({ start: i * segmentLength, end: (i + 1) * segmentLength });
-        }
 
-        const suggestedLabels = Array(numSegments).fill('absence');
-        return res.status(200).json({
-          segments,
-          probabilities: [],
-          timings: [],
-          suggestedLabels
-        });
-      }
-  
-      // 1) Load embeddings
-      console.log('filename:', filename);
-      const embeddingsPath = path.join(
-        process.env.DATA_DIR,
-        process.env.DATASET_NAME,
-        'embeddings',
-        `${filename}.birdnet.embeddings.msgpack`
-      );
-      const buffer = fs.readFileSync(embeddingsPath);
-      const embeddingsData = msgpack.decode(buffer);
-      const { embeddings, timings } = embeddingsData;
-  
-      // 2) Fetch prototypes
-      const { presence_prototype, absence_prototype } = computePrototypes();
-
-  
-      // 3) Predict probabilities
-      const net = new PrototypicalNetwork(presence_prototype, absence_prototype);
-      const probabilities = net.predict(embeddings);  // array of presence probabilities [0..1]
-  
-      // 4) Detect change points for adaptive segmentation
-      const gradients = probabilities.slice(1)
-        .map((prob, idx) => Math.abs(prob - probabilities[idx]));
-      const changePoints = gradients
-        .map((g, idx) => ({ grad: g, index: idx }))
-        .sort((a, b) => b.grad - a.grad)
-        .slice(0, numSegments - 1)
-        .map(item => item.index + 1)
-        .sort((a, b) => a - b);
-  
-      const segments = [];
-      let start = 0;
-      changePoints.forEach(point => {
-        // pick a middle-of-frame time for splitting
-        const splitTime = (timings[point][0] + timings[point][1]) / 2;
-        segments.push({ start, end: splitTime });
-        start = splitTime;
-      });
-      segments.push({ start, end: audioLength });
-  
-      // 5) Generate suggested labels
-      //    By default, do presence if any probability > 0.5 in that segment
-      let suggestedLabels = segments.map(segment => {
-        const hasPresence = timings.some((time, idx) => {
-          const center = (time[0] + time[1]) / 2;
-          return center >= segment.start && center < segment.end && probabilities[idx] > 0.5;
-        });
-        return hasPresence ? 'presence' : 'absence';
-      });
-  
-      // *** Bimodality check *** 
       const bimodal = isBiModal(probabilities);
       if (!bimodal) {
-        // If not bimodal, override everything to absence
-        suggestedLabels = suggestedLabels.map(() => 'absence');
+          suggestedLabels = suggestedLabels.map(() => 'absence');
       }
-  
-      // 6) Return results
-      return res.status(200).json({
-        segments,
-        probabilities,
-        timings: timings.map(t => (t[0] + t[1]) / 2),
-        suggestedLabels
-      });
-    } catch (error) {
+
+      return res.status(200).json({ segments, probabilities, timings: timings.map(t => (t[0] + t[1]) / 2), suggestedLabels });
+  } catch (error) {
       console.error('Error in getSegments:', error);
       return res.status(500).json({ message: 'Failed to compute segments' });
-    }
-  };
+  }
+};
 
-  const getBatch = async (req, res) => {
-    try {
-      // 1) Parse inputs from query params instead of the request body
-      const strategy = req.query.strategy || 'random';
-      const batchSize = parseInt(req.query.batchSize, 10) || 1;
-      const unlabeledFiles = getUnlabeledFileNames();
-  
-      console.log('strategy:', strategy);
-      console.log('batchSize:', batchSize);
-  
-      // 2) Decide which strategy class to use, and whether prototypes are needed
-      let StrategyClass;
-      let needsPrototypes = false;
-  
-      switch (strategy) {
-        case 'uncertainty':
-          StrategyClass = UncertaintySamplingStrategy;
-          needsPrototypes = true;
-          break;
-        case 'certainty':
-          StrategyClass = CertaintySamplingStrategy;
-          needsPrototypes = true;
-          break;
-        case 'high_probability':
-          StrategyClass = HighProbabilitySamplingStrategy;
-          needsPrototypes = true;
-          break;
-        default:
-          // random fallback
-          StrategyClass = RandomSamplingStrategy;
-          needsPrototypes = false;
-          break;
-      }
-  
-      // 3) Fetch prototypes only if required, then sample
-      let prototypes;
-      if (needsPrototypes) {
-        prototypes = computePrototypes();
-      }
-  
-      let sampledFiles;
-      if (needsPrototypes) {
-        const strategyObj = new StrategyClass(unlabeledFiles, batchSize, prototypes);
-        sampledFiles = await strategyObj.sample();
-      } else {
-        const strategyObj = new StrategyClass(unlabeledFiles, batchSize);
-        sampledFiles = strategyObj.sample();
-      }
-      console.log(`sampledFiles (${strategy}):`, sampledFiles);
-  
-      // 4) Build response
-      const batch = sampledFiles.map((filename) => ({
-        filename,
-        audio_length: metadata.files.audio_lengths[`${filename}.wav`],
-        audio_path: `/data/${process.env.DATASET_NAME}/audio/${filename}.wav`,
-        spectrogram_path: `/data/${process.env.DATASET_NAME}/spectrograms/${filename}.png`,
-        embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${filename}.birdnet.embeddings.msgpack`
-      }));
-  
-      // 5) Return JSON
-      res.status(200).json({ batch });
-    } catch (error) {
-      console.error(`Error fetching prototypes or during ${req.query.strategy || 'random'} sampling:`, error);
-      return res.status(500).json({ message: `Error during batch retrieval` });
+const getBatch = async (req, res) => {
+  try {
+    // 1) Parse inputs from query params instead of the request body
+    const strategy = req.query.strategy || 'random';
+    const batchSize = parseInt(req.query.batchSize, 10) || 1;
+    const unlabeledFiles = getUnlabeledFileNames();
+
+    console.log('strategy:', strategy);
+    console.log('batchSize:', batchSize);
+
+    // 2) Decide which strategy class to use, and whether prototypes are needed
+    let StrategyClass;
+    let needsPrototypes = false;
+
+    switch (strategy) {
+      case 'uncertainty':
+        StrategyClass = UncertaintySamplingStrategy;
+        needsPrototypes = true;
+        break;
+      case 'certainty':
+        StrategyClass = CertaintySamplingStrategy;
+        needsPrototypes = true;
+        break;
+      case 'high_probability':
+        StrategyClass = HighProbabilitySamplingStrategy;
+        needsPrototypes = true;
+        break;
+      default:
+        // random fallback
+        StrategyClass = RandomSamplingStrategy;
+        needsPrototypes = false;
+        break;
     }
-  };
+
+    // 3) Fetch prototypes only if required, then sample
+    let prototypes;
+    if (needsPrototypes) {
+      prototypes = computePrototypes();
+    }
+
+    let sampledFiles;
+    if (needsPrototypes) {
+      const strategyObj = new StrategyClass(unlabeledFiles, batchSize, prototypes);
+      sampledFiles = await strategyObj.sample();
+    } else {
+      const strategyObj = new StrategyClass(unlabeledFiles, batchSize);
+      sampledFiles = strategyObj.sample();
+    }
+    console.log(`sampledFiles (${strategy}):`, sampledFiles);
+
+    // 4) Build response
+    const batch = sampledFiles.map((filename) => ({
+      filename,
+      audio_length: metadata.files.audio_lengths[`${filename}.wav`],
+      audio_path: `/data/${process.env.DATASET_NAME}/audio/${filename}.wav`,
+      spectrogram_path: `/data/${process.env.DATASET_NAME}/spectrograms/${filename}.png`,
+      embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${filename}.birdnet.embeddings.msgpack`
+    }));
+
+    // 5) Return JSON
+    res.status(200).json({ batch });
+  } catch (error) {
+    console.error(`Error fetching prototypes or during ${req.query.strategy || 'random'} sampling:`, error);
+    return res.status(500).json({ message: `Error during batch retrieval` });
+  }
+};
   
   
 const submitLabels = (req, res) => {
