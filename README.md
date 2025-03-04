@@ -1,3 +1,7 @@
+# Audio Annotation Interface
+
+![Illustrationg of the audio weak labeling interface. The user can select a sampling strategy and a labeling strategy, and then weakly label audio segments by indicating presence by clicking on them.](interface.png)
+
 # How to use the Annotation Tool?
 
 Clone the annotation tool code
