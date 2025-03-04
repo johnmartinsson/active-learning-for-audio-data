@@ -2,24 +2,7 @@
 import sys
 import json
 import numpy as np
-from ruptures import Binseg
 from scipy.signal import find_peaks
-
-def detect_change_points_binary_segmentation(probabilities, num_segments):
-    probabilities = np.array(probabilities)
-    model = Binseg(model="l2").fit(probabilities)
-    
-    # Ensure the number of breakpoints is valid
-    max_bkps = len(probabilities) - 1
-    n_bkps = min(num_segments - 1, max_bkps)
-    print("Number of breakpoints:", n_bkps, file=sys.stderr)
-    print("Maximum number of breakpoints:", max_bkps, file=sys.stderr)
-    
-    if n_bkps <= 0:
-        return []
-    
-    change_points = model.predict(n_bkps=n_bkps)
-    return change_points
 
 def euclidean_distance_score(x1, x2):
     return np.sqrt(np.sum(np.power(x1 - x2, 2)))
