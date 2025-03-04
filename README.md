@@ -1,30 +1,44 @@
 # Audio Annotation Interface
 
-![Illustrationg of the audio weak labeling interface. The user can select a sampling strategy and a labeling strategy, and then weakly label audio segments by indicating presence by clicking on them.](interface.png)
+![Audio Annotation Interface](interface.png)
 
-A simple audio annotation interface. The user can select between different sampling and labeling strategies.
+A simple and interactive audio annotation interface that allows users to select different sampling and labeling strategies to efficiently label audio segments.
+
+## Features
+
+- **Sampling Strategies:** Choose how audio recordings are selected for annotation.
+- **Labeling Strategies:** Define how audio recordings are segmented for labeling.
+- **Iterative Model Updates:** Labels are stored and used to update the underlying model for improved predictions.
 
 ## Sampling Strategies
-The currently implemented choices are:
+The following sampling strategies are implemented:
 
-- Uncertainty Sampling: sample the audio recording next where the underlying model predictions has the highest average entropy,
-- Random Sampling: sample a random audio recording next,
-- Certainty Sampling: sample the audio recording next where the underlying model predictions has the lowest average entropy, and
-- High Probability Sampling: sample the audio recording next where the underlying model predictions has the highest average predicted presence probability.
+- **Uncertainty Sampling**: Selects the audio recording where the model predictions have the highest average entropy.
+- **Random Sampling**: Selects a random audio recording.
+- **Certainty Sampling**: Selects the audio recording where the model predictions have the lowest average entropy.
+- **High Probability Sampling**: Selects the audio recording where the model predictions have the highest average predicted presence probability.
 
 ## Labeling Strategies
+Two labeling strategies are available:
 
-- Fixed Segments: split the audio recording into fixed and equal length segments, and
-- Adapted Segments: use underlying model predictions to derive plausible segmentation based on change point detection.
+- **Fixed Segments**: Splits the audio recording into equal-length segments.
+- **Adaptive Segments**: Uses model predictions to derive plausible segmentations based on change-point detection.
 
-Each time the user clicks "Submit Labels" the labels are stored in the './data/example/labels' directory on the backend, and the underlying model is update with these labels to hopefully produce better label suggestions the next iteration.
+## Label Storage and Model Updates
+Each time the user clicks **"Submit Labels"**, the labels are stored in the `./data/example/labels` directory. The underlying model is then updated with these new labels to refine future label suggestions.
 
 ## Relevant Research
+This tool is based on research exploring the accuracy and efficiency of weak labeling strategies:
 
-- [The Accuracy Cost of Weak Labeling](https://johnmartinsson.org/publications/2025/the-accuracy-cost-of-weak-labeling): A theoretical framework for weak labeling where we derive the expected label accuracy of fixed segment weak labeling, and compare to oracle segment weak labeling.
-- [Adaptive Change-Point Detection](https://johnmartinsson.org/publications/2024/adaptive-change-point-detection): An emperical study of the benefits of adapted segment weak labeling, comparing to fixed segment weak labeling, oracle weak labeling and a fixed change-point detection method.
+- **[The Accuracy Cost of Weak Labeling](https://johnmartinsson.org/publications/2025/the-accuracy-cost-of-weak-labeling)**: A theoretical framework analyzing the expected label accuracy of fixed-segment weak labeling compared to oracle segment weak labeling.
+- **[Adaptive Change-Point Detection](https://johnmartinsson.org/publications/2024/adaptive-change-point-detection)**: An empirical study comparing adapted segment weak labeling with fixed segment weak labeling, oracle weak labeling, and fixed change-point detection methods.
 
-Consider citing either of these works if you end up using this annotation tool and find the above research helpful/relevant.
+If you find this annotation tool and related research helpful, please consider citing these works.
+
+---
+
+Feel free to modify and extend the interface based on your specific annotation needs. Contributions and feedback are welcome!
+
 
 # How to use the Annotation Tool?
 
