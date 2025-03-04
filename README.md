@@ -21,10 +21,10 @@ Each time the user clicks "Submit Labels" the labels are stored in the './data/e
 
 ## Relevant Research
 
-- [The Accuracy Cost of Weak Labeling](https://johnmartinsson.org/publications/2025/the-accuracy-cost-of-weak-labeling): a theoretical study of the expected label accuracy of fixed length weak labeling.
-- [Adaptive Change-Point Detection](https://johnmartinsson.org/publications/2024/adaptive-change-point-detection): an emperical study of the benefits of adapted segments for weak labeling.
+- [The Accuracy Cost of Weak Labeling](https://johnmartinsson.org/publications/2025/the-accuracy-cost-of-weak-labeling): A theoretical framework for weak labeling where we derive the expected label accuracy of fixed segment weak labeling, and compare to oracle segment weak labeling.
+- [Adaptive Change-Point Detection](https://johnmartinsson.org/publications/2024/adaptive-change-point-detection): An emperical study of the benefits of adapted segment weak labeling, comparing to fixed segment weak labeling, oracle weak labeling and a fixed change-point detection method.
 
-Consider citing either of these works if you end up using this and find the research helpful/relevant.
+Consider citing either of these works if you end up using this annotation tool and find the above research helpful/relevant.
 
 # How to use the Annotation Tool?
 
