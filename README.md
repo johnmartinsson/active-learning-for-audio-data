@@ -26,6 +26,28 @@ where you set the <directory> to that where you cloned the 'active-learning-for-
 - specgrograms: pre-computed Mel spectrograms for each audio segment, and
 - embeddings: pre-computed BirdNET embeddings for each audio segment.
 
+For the example file, it should look like this:
+
+    ├── audio
+    │   ├── soundscape_segment_1.wav
+    │   ├── soundscape_segment_2.wav
+    │   ├── soundscape_segment_3.wav
+    │   └── soundscape_segment_4.wav
+    ├── embeddings
+    │   ├── soundscape_segment_1.birdnet.embeddings.msgpack
+    │   ├── soundscape_segment_2.birdnet.embeddings.msgpack
+    │   ├── soundscape_segment_3.birdnet.embeddings.msgpack
+    │   └── soundscape_segment_4.birdnet.embeddings.msgpack
+    ├── metadata.json
+    └── spectrograms
+        ├── soundscape_segment_1.png
+        ├── soundscape_segment_2.png
+        ├── soundscape_segment_3.png
+        └── soundscape_segment_4.png
+    
+    4 directories, 13 files
+
+
 ## Prepare the backend
 
 The node.js backend does run some python code, and this will setup the environment for that.
