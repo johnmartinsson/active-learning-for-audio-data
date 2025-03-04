@@ -20,11 +20,11 @@ Run the data preparation script
 
     python prepare_audio_data.py birdnet_analyzer/example/ <directory>/active-learning-for-audio-data/backend/data/example 
 
-where you set the <directory> to that where you cloned the 'active-learning-for-audio-data' repository. This will pre-process the data by
+where you set the <directory> to that where you cloned the 'active-learning-for-audio-data' repository. This will pre-process the data and create three different directories:
 
-- splitting audio into 30 second segments (audio),
-- pre-compute Mel spectrograms for each segment (spectrogram), and
-- pre-compute the BirdNET embeddings for each segment (embeddings).
+- audio: audio segments of maximum length 30 seconds,
+- specgrograms: pre-computed Mel spectrograms for each audio segment, and
+- embeddings: pre-computed BirdNET embeddings for each audio segment.
 
 ## Prepare the backend
 
