@@ -12,7 +12,7 @@ Clone a fork of the BitdNET-Analyzer
 Create an environment for the BirdNET-Analyzer
 
     cd BirdNET-Analyzer
-    conda create -n birdnet
+    conda create -n birdnet python==3.11
     conda activate birdnet
     pip install -r requirements.txt
 
