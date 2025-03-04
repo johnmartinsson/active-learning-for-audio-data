@@ -99,6 +99,14 @@ The node.js backend does run some python code, and this will setup the environme
     conda activate audio-labeling
     pip install -r requirements.txt
 
+Configure the backend. There is a .env file containing:
+
+    DATA_DIR=../data
+    DATASET_NAME=example
+    METADATA_FILE=metadata.json
+
+simply change the DATASET_NAME to the name of the output folder when preparing the data. In the example, this is simply called 'example'.
+
 Next install the node.js dependencies and start the backend
 
     npm install
