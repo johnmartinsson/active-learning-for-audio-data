@@ -231,6 +231,8 @@ const getSegments = async (req, res) => {
       const { filename } = req.params;
       const labelingStrategyChoice = req.query.labelingStrategyChoice || 'fixed';
       const numSegments = parseInt(req.query.numSegments, 10) || 10;
+      const negativeClusteringMethod = req.query.negativeClusteringMethod || 'none';
+      const numNegativeClusters = parseInt(req.query.numNegativeClusters, 10) || 1;
       const audioLength = metadata.files.audio_lengths[`${filename}.wav`];
       const embeddingsPath = path.join(
         process.env.DATA_DIR,
@@ -238,6 +240,8 @@ const getSegments = async (req, res) => {
         'embeddings',
         `${filename}.birdnet.embeddings.msgpack`
       );
+      const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
+      const embeddingsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'embeddings');
 
       const segmentResponse = await runPythonJsonModule('python.acpd.get_segments_cli', {
         filename,
@@ -245,6 +249,10 @@ const getSegments = async (req, res) => {
         requested_num_segments: numSegments,
         audio_length: audioLength,
         embeddings_path: embeddingsPath,
+        labels_dir: labelsDir,
+        embeddings_dir: embeddingsDir,
+        negative_clustering_method: negativeClusteringMethod,
+        num_negative_clusters: numNegativeClusters,
       });
 
       return res.status(200).json(segmentResponse);
