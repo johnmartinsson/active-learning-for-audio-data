@@ -243,6 +243,8 @@ const AnnotationTool = ({
             probabilities={probabilities}
             timings={timings}
             audioLength={file.audio_length}
+            segments={segments}
+            currentTime={currentTime}
           />
         )}
         <Waveform
