@@ -198,6 +198,50 @@ const getUnlabeledFileNames = () => {
     return allFileNames.filter(file => !labeledFileNames.includes(file));
 };
 
+const getClasses = (req, res) => {
+  try {
+    const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
+    if (!fs.existsSync(labelsDir)) {
+      return res.status(200).json({ classes: [] });
+    }
+
+    const classSet = new Set();
+    const files = fs.readdirSync(labelsDir).filter((file) => file.endsWith('.txt'));
+
+    files.forEach((file) => {
+      const labelPath = path.join(labelsDir, file);
+      const lines = fs.readFileSync(labelPath, 'utf8')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+      if (lines.length <= 1) {
+        return;
+      }
+
+      lines.slice(1).forEach((line) => {
+        const parts = line.split(',');
+        if (parts.length < 3) {
+          return;
+        }
+
+        const labelValue = parts.slice(2).join(',').trim();
+        const normalized = normalizeLabel(labelValue);
+        if (!normalized || isBackgroundLikeLabel(normalized) || isLegacyPresenceLabel(normalized)) {
+          return;
+        }
+
+        classSet.add(normalized);
+      });
+    });
+
+    return res.status(200).json({ classes: Array.from(classSet).sort() });
+  } catch (error) {
+    console.error('Error in getClasses:', error);
+    return res.status(500).json({ message: 'Failed to load classes' });
+  }
+};
+
 const detectChangePoints = (probabilities, numSegments) => {
   return new Promise((resolve, reject) => {
       const pythonProcess = spawn('python', ['scripts/change_point_detection.py']);
@@ -402,4 +446,4 @@ const submitLabels = (req, res) => {
     });
 };
 
-module.exports = { getBatch, submitLabels, getLabeledFileNames, getUnlabeledFileNames, getSegments };
+module.exports = { getBatch, submitLabels, getLabeledFileNames, getUnlabeledFileNames, getSegments, getClasses };

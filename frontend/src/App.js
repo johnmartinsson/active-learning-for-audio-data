@@ -32,9 +32,6 @@ const App = () => {
       if (parsedState.numSegments !== undefined) {
         setNumSegments(parsedState.numSegments);
       }
-      if (Array.isArray(parsedState.annotationClasses) && parsedState.annotationClasses.length > 0) {
-        setAnnotationClasses(parsedState.annotationClasses);
-      }
     }
   }, []);
 
@@ -45,10 +42,22 @@ const App = () => {
       batchSize,
       labelingStrategyChoice,
       numSegments,
-      annotationClasses,
     };
     localStorage.setItem('appState', JSON.stringify(appState));
-  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, annotationClasses]);
+  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments]);
+
+  const fetchClasses = useCallback(() => {
+    const url = new URL('http://localhost:5000/api/audio/classes');
+
+    fetch(url, { method: 'GET' })
+      .then((response) => response.json())
+      .then((data) => {
+        const backendClasses = Array.isArray(data.classes) ? data.classes : [];
+        const next = ['background', ...backendClasses.filter((c) => c && c !== 'background')];
+        setAnnotationClasses(Array.from(new Set(next)));
+      })
+      .catch((error) => console.error('Error fetching classes:', error));
+  }, []);
 
   // 2) fetchBatch depends on sampleStrategyChoice, batchSize, etc.
   //    Now using GET with query params
@@ -72,10 +81,19 @@ const App = () => {
     fetchBatch();
   }, [sampleStrategyChoice, batchSize, fetchBatch]);
 
+  useEffect(() => {
+    fetchClasses();
+  }, [fetchClasses]);
+
   // Save settings to localStorage whenever they change
   useEffect(() => {
     saveStateToLocalStorage();
-  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, annotationClasses, saveStateToLocalStorage]);
+  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, saveStateToLocalStorage]);
+
+  const handleLabelsSubmitted = useCallback(() => {
+    fetchBatch();
+    fetchClasses();
+  }, [fetchBatch, fetchClasses]);
 
   const handleSampleStrategyChange = (event) => {
     setSampleStrategyChoice(event.target.value);
@@ -153,7 +171,7 @@ const App = () => {
         <AnnotationTool
           key={index}
           file={file}
-          onLabelsSubmitted={fetchBatch}
+          onLabelsSubmitted={handleLabelsSubmitted}
           labelingStrategyChoice={labelingStrategyChoice}
           numSegments={numSegments}
           availableClasses={annotationClasses}

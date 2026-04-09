@@ -2,6 +2,7 @@
 const express = require('express');
 const {
   getBatch,
+  getClasses,
   getSegments,
   submitLabels
 } = require('../controllers/audioController');
@@ -11,6 +12,10 @@ const router = express.Router();
 // Return a new batch of unlabeled files
 // e.g. GET /audio/batch?strategy=random&batchSize=5
 router.get('/batch', getBatch);
+
+// Return all available positive class labels inferred from saved label files
+// e.g. GET /audio/classes
+router.get('/classes', getClasses);
 
 // Return computed segments for a given file
 // e.g. GET /audio/myfile/segments?labelingStrategyChoice=active&numSegments=10
