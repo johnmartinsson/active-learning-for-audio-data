@@ -11,7 +11,8 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
 
   const [segments, setSegments] = useState([]);
   const [labels, setLabels] = useState([]);
-  const [classes, setClasses] = useState(["background"]);
+  const [classes, setClasses] = useState(['background']);
+  const [currentClass, setCurrentClass] = useState('background');
 
   // Probability data (only relevant if labelingStrategyChoice is "active")
   const [probabilities, setProbabilities] = useState([]);
@@ -48,8 +49,20 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
           return label;
         });
 
+        const discoveredClasses = Array.from(
+          new Set(normalizedLabels.filter((label) => label && label !== 'background'))
+        );
+        const nextClasses = ['background', ...discoveredClasses];
+
         setSegments(safeSegments);
         setLabels(normalizedLabels);
+        setClasses(nextClasses);
+        setCurrentClass((prev) => {
+          if (nextClasses.includes(prev)) {
+            return prev;
+          }
+          return nextClasses[1] || 'background';
+        });
         setProbabilities(data.probabilities || []);
         setTimings(data.timings || []);
       } catch (err) {
@@ -94,16 +107,35 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
     });
   };
 
-  const createClass = () => {
-    const name = prompt("Enter new class name:");
-
-    if (!name) return;
-
-    if (!classes.includes(name)) {
-      setClasses([...classes, name]);
+  const assignCurrentClassToSegment = (segmentIndex) => {
+    if (segmentIndex < 0 || segmentIndex >= labels.length) {
+      return;
     }
 
-    assignClass(name);
+    const newLabels = [...labels];
+    const existing = newLabels[segmentIndex] || 'background';
+    newLabels[segmentIndex] = existing === currentClass ? 'background' : currentClass;
+    setLabels(newLabels);
+  };
+
+  const createClass = () => {
+    const name = prompt('Enter new class name:');
+    const cleanedName = (name || '').trim();
+
+    if (!cleanedName) {
+      return;
+    }
+
+    const isDuplicate = classes.some(
+      (existingClass) => existingClass.toLowerCase() === cleanedName.toLowerCase()
+    );
+
+    if (!isDuplicate) {
+      setClasses([...classes, cleanedName]);
+    }
+
+    setCurrentClass(cleanedName);
+    assignClass(cleanedName);
   };
 
   const handleSubmit = async () => {
@@ -140,12 +172,30 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
   return (
     <div className="annotation-tool">
       <h3>{file.filename}</h3>
+      <div style={{ marginBottom: '10px' }}>
+        <strong>Current labeling class:</strong>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '6px' }}>
+          {classes.map((className) => (
+            <label key={className} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <input
+                type="radio"
+                name="current-labeling-class"
+                value={className}
+                checked={currentClass === className}
+                onChange={() => setCurrentClass(className)}
+              />
+              <span>{className}</span>
+            </label>
+          ))}
+        </div>
+      </div>
       <div className="media-container">
         <Spectrogram
           src={`http://localhost:5000${file.spectrogram_path}`}
           currentTime={currentTime}
           segments={segments}
           labels={labels}
+          onAssignSegment={assignCurrentClassToSegment}
           openClassSelector={openClassSelector}
           duration={file.audio_length}
         />
