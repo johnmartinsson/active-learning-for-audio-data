@@ -5,14 +5,37 @@ import Spectrogram from './Spectrogram';
 import ProbabilityChart from './ProbabilityChart';
 import ClassSelector from "./ClassSelector";
 
-const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSegments }) => {
+const AnnotationTool = ({
+  file,
+  onLabelsSubmitted,
+  labelingStrategyChoice,
+  numSegments,
+  availableClasses,
+  onClassesChange
+}) => {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
   const [segments, setSegments] = useState([]);
   const [labels, setLabels] = useState([]);
-  const [classes, setClasses] = useState(['background']);
+  const [classes, setClasses] = useState(availableClasses && availableClasses.length > 0 ? availableClasses : ['background']);
   const [currentClass, setCurrentClass] = useState('background');
+
+  const sameClassList = (a, b) => {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((value, idx) => value === b[idx]);
+  };
+
+  useEffect(() => {
+    if (!Array.isArray(availableClasses) || availableClasses.length === 0) {
+      return;
+    }
+
+    setClasses(availableClasses);
+    setCurrentClass((prev) => (availableClasses.includes(prev) ? prev : (availableClasses[1] || 'background')));
+  }, [availableClasses]);
 
   // Probability data (only relevant if labelingStrategyChoice is "active")
   const [probabilities, setProbabilities] = useState([]);
@@ -52,11 +75,17 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
         const discoveredClasses = Array.from(
           new Set(normalizedLabels.filter((label) => label && label !== 'background'))
         );
-        const nextClasses = ['background', ...discoveredClasses];
+        const baseClasses = Array.isArray(availableClasses) && availableClasses.length > 0
+          ? availableClasses
+          : ['background'];
+        const nextClasses = Array.from(new Set(['background', ...baseClasses, ...discoveredClasses]));
 
         setSegments(safeSegments);
         setLabels(normalizedLabels);
         setClasses(nextClasses);
+        if (onClassesChange && !sameClassList(baseClasses, nextClasses)) {
+          onClassesChange(nextClasses);
+        }
         setCurrentClass((prev) => {
           if (nextClasses.includes(prev)) {
             return prev;
@@ -71,7 +100,7 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
     };
 
     fetchSegments();
-  }, [file, labelingStrategyChoice, numSegments]);
+  }, [file, labelingStrategyChoice, numSegments, availableClasses, onClassesChange]);
 
   const [selectorState, setSelectorState] = useState({
     visible: false,
@@ -131,11 +160,21 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
     );
 
     if (!isDuplicate) {
-      setClasses([...classes, cleanedName]);
+      const updatedClasses = [...classes, cleanedName];
+      setClasses(updatedClasses);
+      if (onClassesChange) {
+        onClassesChange(updatedClasses);
+      }
+      setCurrentClass(cleanedName);
+      assignClass(cleanedName);
+      return;
     }
 
-    setCurrentClass(cleanedName);
-    assignClass(cleanedName);
+    const existingClass = classes.find(
+      (className) => className.toLowerCase() === cleanedName.toLowerCase()
+    ) || cleanedName;
+    setCurrentClass(existingClass);
+    assignClass(existingClass);
   };
 
   const handleSubmit = async () => {

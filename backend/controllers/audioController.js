@@ -12,6 +12,15 @@ require('dotenv').config();
 const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, process.env.METADATA_FILE);
 const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
 
+const normalizeLabel = (label) => String(label || '').trim().toLowerCase();
+
+const isBackgroundLikeLabel = (label) => {
+  const normalized = normalizeLabel(label);
+  return normalized === '' || normalized === 'background' || normalized === 'absence';
+};
+
+const isLegacyPresenceLabel = (label) => normalizeLabel(label) === 'presence';
+
 // At the top of audioController.js, or put this in a separate utils file
 const computePrototypes = () => {
   const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
@@ -68,10 +77,10 @@ const computePrototypes = () => {
       timings.forEach((timing, index) => {
         const timingCenter = (timing[0] + timing[1]) / 2;
         if (timingCenter >= st && timingCenter <= et) {
-          if (label === 'presence') {
-            presence_embeddings.push(embeddings[index]);
-          } else if (label === 'absence') {
+          if (isBackgroundLikeLabel(label)) {
             absence_embeddings.push(embeddings[index]);
+          } else {
+            presence_embeddings.push(embeddings[index]);
           }
         }
       });
@@ -313,16 +322,24 @@ const submitLabels = (req, res) => {
             const { timings, embeddings } = embeddingsData;
             const presence_embeddings = [];
             const absence_embeddings = [];
+            const class_embeddings = {};
 
             labels.forEach(label => {
-                const labelCenter = (label.start_time + label.end_time) / 2;
+              const normalizedLabel = normalizeLabel(label.label) || 'background';
                 timings.forEach((timing, index) => {
                     const timingCenter = (timing[0] + timing[1]) / 2;
                     if (timingCenter >= label.start_time && timingCenter <= label.end_time) {
-                        if (label.label === 'presence') {
+                  if (isBackgroundLikeLabel(normalizedLabel)) {
+                    absence_embeddings.push(embeddings[index]);
+                  } else {
                             presence_embeddings.push(embeddings[index]);
-                        } else if (label.label === 'absence') {
-                            absence_embeddings.push(embeddings[index]);
+
+                    if (!isLegacyPresenceLabel(normalizedLabel)) {
+                      if (!class_embeddings[normalizedLabel]) {
+                        class_embeddings[normalizedLabel] = [];
+                      }
+                      class_embeddings[normalizedLabel].push(embeddings[index]);
+                    }
                         }
                     }
                 });
@@ -330,6 +347,7 @@ const submitLabels = (req, res) => {
 
             embeddingsData.presence_embeddings = presence_embeddings;
             embeddingsData.absence_embeddings = absence_embeddings;
+            embeddingsData.class_embeddings = class_embeddings;
 
             const updatedData = msgpack.encode(embeddingsData);
             fs.writeFile(embeddingsPath, updatedData, (err) => {

@@ -5,6 +5,7 @@ import './styles.css';
 
 const App = () => {
   const [batch, setBatch] = useState([]);
+  const [annotationClasses, setAnnotationClasses] = useState(['background']);
 
   // Sample strategy settings
   const [sampleStrategyChoice, setSampleStrategyChoice] = useState('random');
@@ -31,6 +32,9 @@ const App = () => {
       if (parsedState.numSegments !== undefined) {
         setNumSegments(parsedState.numSegments);
       }
+      if (Array.isArray(parsedState.annotationClasses) && parsedState.annotationClasses.length > 0) {
+        setAnnotationClasses(parsedState.annotationClasses);
+      }
     }
   }, []);
 
@@ -41,9 +45,10 @@ const App = () => {
       batchSize,
       labelingStrategyChoice,
       numSegments,
+      annotationClasses,
     };
     localStorage.setItem('appState', JSON.stringify(appState));
-  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments]);
+  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, annotationClasses]);
 
   // 2) fetchBatch depends on sampleStrategyChoice, batchSize, etc.
   //    Now using GET with query params
@@ -70,7 +75,7 @@ const App = () => {
   // Save settings to localStorage whenever they change
   useEffect(() => {
     saveStateToLocalStorage();
-  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, saveStateToLocalStorage]);
+  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, annotationClasses, saveStateToLocalStorage]);
 
   const handleSampleStrategyChange = (event) => {
     setSampleStrategyChoice(event.target.value);
@@ -151,6 +156,8 @@ const App = () => {
           onLabelsSubmitted={fetchBatch}
           labelingStrategyChoice={labelingStrategyChoice}
           numSegments={numSegments}
+          availableClasses={annotationClasses}
+          onClassesChange={setAnnotationClasses}
         />
       ))}
     </div>
