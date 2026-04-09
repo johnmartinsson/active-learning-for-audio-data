@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import Waveform from './Waveform';
 import Spectrogram from './Spectrogram';
 import ProbabilityChart from './ProbabilityChart';
+import ClassSelector from "./ClassSelector";
 
 const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSegments }) => {
   const [currentTime, setCurrentTime] = useState(0);
@@ -10,6 +11,7 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
 
   const [segments, setSegments] = useState([]);
   const [labels, setLabels] = useState([]);
+  const [classes, setClasses] = useState(["background"]);
 
   // Probability data (only relevant if labelingStrategyChoice is "active")
   const [probabilities, setProbabilities] = useState([]);
@@ -32,8 +34,22 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
         }
         const data = await response.json();
 
-        setSegments(data.segments || []);
-        setLabels(data.suggestedLabels || []);
+        const safeSegments = data.segments || [];
+        const suggested = data.suggestedLabels || [];
+
+        const normalizedLabels = safeSegments.map((_, idx) => {
+          const label = suggested[idx];
+
+          // Legacy backend suggestions are binary; treat them as unlabeled/background.
+          if (!label || label === 'presence' || label === 'absence' || label === 'background') {
+            return 'background';
+          }
+
+          return label;
+        });
+
+        setSegments(safeSegments);
+        setLabels(normalizedLabels);
         setProbabilities(data.probabilities || []);
         setTimings(data.timings || []);
       } catch (err) {
@@ -44,20 +60,50 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
     fetchSegments();
   }, [file, labelingStrategyChoice, numSegments]);
 
+  const [selectorState, setSelectorState] = useState({
+    visible: false,
+    segmentIndex: null,
+    x: 0,
+    y: 0
+  });
+
   const handlePlayPause = () => {
     setIsPlaying(!isPlaying);
   };
 
-  const toggleLabel = (time) => {
-    // Flip the label in whichever segment the user clicked
-    const updatedLabels = labels.map((label, i) => {
-      const seg = segments[i];
-      if (time >= seg.start && time < seg.end) {
-        return label === 'absence' ? 'presence' : 'absence';
-      }
-      return label;
+  const openClassSelector = (segmentIndex, x, y) => {
+    setSelectorState({
+      visible: true,
+      segmentIndex,
+      x,
+      y
     });
-    setLabels(updatedLabels);
+  };
+
+  const assignClass = (className) => {
+    const newLabels = [...labels];
+    newLabels[selectorState.segmentIndex] = className;
+
+    setLabels(newLabels);
+
+    setSelectorState({
+      visible: false,
+      segmentIndex: null,
+      x: 0,
+      y: 0
+    });
+  };
+
+  const createClass = () => {
+    const name = prompt("Enter new class name:");
+
+    if (!name) return;
+
+    if (!classes.includes(name)) {
+      setClasses([...classes, name]);
+    }
+
+    assignClass(name);
   };
 
   const handleSubmit = async () => {
@@ -100,7 +146,7 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
           currentTime={currentTime}
           segments={segments}
           labels={labels}
-          toggleLabel={toggleLabel}
+          openClassSelector={openClassSelector}
           duration={file.audio_length}
         />
         {labelingStrategyChoice === 'active' && (
@@ -124,6 +170,15 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
       <button onClick={handleSubmit}>
         Submit Labels
       </button>
+      {selectorState.visible && (
+        <ClassSelector
+          x={selectorState.x}
+          y={selectorState.y}
+          classes={classes}
+          onSelect={assignClass}
+          onNewClass={createClass}
+        />
+      )}
     </div>
   );
 };

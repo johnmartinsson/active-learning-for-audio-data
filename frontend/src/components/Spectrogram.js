@@ -1,13 +1,43 @@
 import React, { useRef } from 'react';
 
-const Spectrogram = ({ src, currentTime, segments, labels, toggleLabel, duration }) => {
+const classColors = [
+  "rgba(0,255,0,0.3)",
+  "rgba(255,0,0,0.3)",
+  "rgba(0,0,255,0.3)",
+  "rgba(255,255,0,0.3)",
+  "rgba(255,0,255,0.3)"
+];
+
+const getColorForLabel = (label) => {
+    if (!label || label === 'background') {
+        return 'transparent';
+    }
+
+    // Deterministic hash so each label gets a stable color across segments/files.
+    let hash = 0;
+    for (let i = 0; i < label.length; i++) {
+        hash = ((hash << 5) - hash) + label.charCodeAt(i);
+        hash |= 0;
+    }
+
+    const idx = Math.abs(hash) % classColors.length;
+    return classColors[idx];
+};
+
+const Spectrogram = ({ src, currentTime, segments, labels, openClassSelector, duration }) => {
     const containerRef = useRef(null);
 
     const handleClick = (event) => {
         const rect = containerRef.current.getBoundingClientRect();
         const x = event.clientX - rect.left;
         const time = (x / rect.width) * duration;
-        toggleLabel(time);
+        const segmentIndex = segments.findIndex(
+            seg => time >= seg.start && time < seg.end
+        );
+
+        if (segmentIndex !== -1) {
+            openClassSelector(segmentIndex, event.clientX, event.clientY);
+        }
     };
 
     return (
@@ -34,12 +64,13 @@ const Spectrogram = ({ src, currentTime, segments, labels, toggleLabel, duration
                         }}
                     ></div>
                     {/* Draw box for presence label */}
-                    {labels[index] === 'presence' && (
+                    {labels[index] && labels[index] !== "background" && (
                         <div
                             className="segment-box"
                             style={{
                                 left: `${(segment.start / duration) * 100}%`,
                                 width: `${((segment.end - segment.start) / duration) * 100}%`,
+                                backgroundColor: getColorForLabel(labels[index]),
                             }}
                         ></div>
                     )}
