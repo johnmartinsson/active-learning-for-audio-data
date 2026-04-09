@@ -11,6 +11,7 @@ require('dotenv').config();
 
 const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, process.env.METADATA_FILE);
 const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+const backendRoot = path.join(__dirname, '..');
 
 const normalizeLabel = (label) => String(label || '').trim().toLowerCase();
 
@@ -20,6 +21,81 @@ const isBackgroundLikeLabel = (label) => {
 };
 
 const isLegacyPresenceLabel = (label) => normalizeLabel(label) === 'presence';
+
+const runPythonJsonScript = (scriptName, inputData) => {
+  return new Promise((resolve, reject) => {
+    const pythonExecutable = process.env.PYTHON_BIN || 'python3';
+    const scriptPath = path.join(backendRoot, 'scripts', scriptName);
+    const pythonProcess = spawn(pythonExecutable, [scriptPath], { cwd: backendRoot });
+
+    let stdout = '';
+    let stderr = '';
+
+    pythonProcess.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    pythonProcess.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    pythonProcess.on('error', (error) => {
+      reject(error);
+    });
+
+    pythonProcess.on('close', (code) => {
+      if (code !== 0) {
+        return reject(new Error(`Python script ${scriptName} exited with code ${code}: ${stderr.trim()}`));
+      }
+
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (error) {
+        reject(new Error(`Failed to parse JSON from ${scriptName}: ${error.message}. Output: ${stdout}`));
+      }
+    });
+
+    pythonProcess.stdin.write(JSON.stringify(inputData));
+    pythonProcess.stdin.end();
+  });
+};
+
+const runPythonJsonModule = (moduleName, inputData) => {
+  return new Promise((resolve, reject) => {
+    const pythonExecutable = process.env.PYTHON_BIN || 'python3';
+    const pythonProcess = spawn(pythonExecutable, ['-m', moduleName], { cwd: backendRoot });
+
+    let stdout = '';
+    let stderr = '';
+
+    pythonProcess.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    pythonProcess.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    pythonProcess.on('error', (error) => {
+      reject(error);
+    });
+
+    pythonProcess.on('close', (code) => {
+      if (code !== 0) {
+        return reject(new Error(`Python module ${moduleName} exited with code ${code}: ${stderr.trim()}`));
+      }
+
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (error) {
+        reject(new Error(`Failed to parse JSON from module ${moduleName}: ${error.message}. Output: ${stdout}`));
+      }
+    });
+
+    pythonProcess.stdin.write(JSON.stringify(inputData));
+    pythonProcess.stdin.end();
+  });
+};
 
 // At the top of audioController.js, or put this in a separate utils file
 const computePrototypes = () => {
@@ -156,65 +232,22 @@ const getSegments = async (req, res) => {
       const labelingStrategyChoice = req.query.labelingStrategyChoice || 'fixed';
       const numSegments = parseInt(req.query.numSegments, 10) || 10;
       const audioLength = metadata.files.audio_lengths[`${filename}.wav`];
+      const embeddingsPath = path.join(
+        process.env.DATA_DIR,
+        process.env.DATASET_NAME,
+        'embeddings',
+        `${filename}.birdnet.embeddings.msgpack`
+      );
 
-      if (labelingStrategyChoice === 'fixed') {
-          const segmentLength = audioLength / numSegments;
-          const segments = [];
-          for (let i = 0; i < numSegments; i++) {
-              segments.push({ start: i * segmentLength, end: (i + 1) * segmentLength });
-          }
-          const suggestedLabels = Array(numSegments).fill('absence');
-          return res.status(200).json({ segments, probabilities: [], timings: [], suggestedLabels });
-      }
-
-      const embeddingsPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'embeddings', `${filename}.birdnet.embeddings.msgpack`);
-      const buffer = fs.readFileSync(embeddingsPath);
-      const embeddingsData = msgpack.decode(buffer);
-      const { embeddings, timings } = embeddingsData;
-
-      const { presence_prototype, absence_prototype } = computePrototypes();
-      const net = new PrototypicalNetwork(presence_prototype, absence_prototype);
-      const probabilities = net.predict(embeddings);
-
-      const changePoints = await detectChangePoints(probabilities, numSegments);
-
-      const segments = [];
-      let start = 0;
-      changePoints.forEach(point => {
-          const splitTime = (timings[point][0] + timings[point][1]) / 2;
-          segments.push({ start, end: splitTime });
-          start = splitTime;
-      });
-      segments.push({ start, end: audioLength });
-
-      let suggestedLabels = segments.map(segment => {
-        const segmentProbabilities = timings
-            .map((time, idx) => {
-                const center = (time[0] + time[1]) / 2;
-                return center >= segment.start && center < segment.end ? probabilities[idx] : null;
-            })
-            .filter(prob => prob !== null);
-    
-        const averageProbability = segmentProbabilities.reduce((sum, prob) => sum + prob, 0) / segmentProbabilities.length;
-        return averageProbability >= 0.5 ? 'presence' : 'absence';
+      const segmentResponse = await runPythonJsonModule('python.acpd.get_segments_cli', {
+        filename,
+        labeling_strategy_choice: labelingStrategyChoice,
+        requested_num_segments: numSegments,
+        audio_length: audioLength,
+        embeddings_path: embeddingsPath,
       });
 
-      // Helper for checking bimodality
-      function isBiModal(probabilities) {
-        const lowThreshold = 0.3;
-        const highThreshold = 0.7;
-        const lowCount = probabilities.filter(p => p <= lowThreshold).length;
-        const highCount = probabilities.filter(p => p >= highThreshold).length;
-        const totalCount = probabilities.length;
-        return (lowCount / totalCount > 0.1) && (highCount / totalCount > 0.1);
-      }
-
-      const bimodal = isBiModal(probabilities);
-      if (!bimodal) {
-          suggestedLabels = suggestedLabels.map(() => 'absence');
-      }
-
-      return res.status(200).json({ segments, probabilities, timings: timings.map(t => (t[0] + t[1]) / 2), suggestedLabels });
+      return res.status(200).json(segmentResponse);
   } catch (error) {
       console.error('Error in getSegments:', error);
       return res.status(500).json({ message: 'Failed to compute segments' });
