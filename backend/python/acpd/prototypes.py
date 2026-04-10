@@ -135,7 +135,7 @@ def infer_frame_labels_and_probabilities(query_embeddings, positive_prototypes, 
     Returns
     -------
     tuple[list[str], list[float], np.ndarray, list[str]]
-        ``(frame_labels, positive_mass, distances, prototype_labels)`` where
+        ``(frame_labels, positive_mass, prototype_probabilities, prototype_labels)`` where
         ``positive_mass`` is a single foreground trace produced by summing
         probabilities over non-background prototypes.
     """
@@ -157,4 +157,4 @@ def infer_frame_labels_and_probabilities(query_embeddings, positive_prototypes, 
     else:
         positive_mass = [0.0] * len(frame_labels)
 
-    return frame_labels, positive_mass, distances, prototype_labels
+    return frame_labels, positive_mass, probabilities, prototype_labels

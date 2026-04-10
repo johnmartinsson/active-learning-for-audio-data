@@ -153,6 +153,160 @@ def infer_segment_labels(segments, centers, frame_labels):
     return labels
 
 
+def infer_segment_labels_from_probabilities(segments, centers, prototype_probabilities, prototype_labels):
+    """Assign segment labels from soft prototype probabilities.
+
+    Parameters
+    ----------
+    segments : list[dict[str, float]]
+        Segment boundaries.
+    centers : list[float]
+        Frame center times.
+    prototype_probabilities : np.ndarray
+        Frame-by-prototype probability matrix with shape
+        ``(n_frames, n_prototypes)``.
+    prototype_labels : list[str]
+        Label associated with each prototype column.
+
+    Returns
+    -------
+    list[str]
+        One suggested label per segment.
+
+    Notes
+    -----
+    This method avoids a hard-assignment mismatch where the change-point curve
+    can indicate strong foreground confidence while nearest-prototype labels
+    flip to background for a subset of frames. It also includes a small
+    consistency post-pass for short background islands.
+    """
+    labels = []
+    mean_positive_masses = []
+    max_positive_masses = []
+    centers_arr = np.array(centers, dtype=np.float64)
+
+    if len(prototype_probabilities) == 0 or len(prototype_labels) == 0:
+        return ["background"] * len(segments)
+
+    # Collapse prototype columns into normalized label groups (e.g. background_0 -> background).
+    group_indices = {}
+    for proto_idx, label in enumerate(prototype_labels):
+        normalized = normalize_segment_label(label)
+        if normalized not in group_indices:
+            group_indices[normalized] = []
+        group_indices[normalized].append(proto_idx)
+
+    positive_proto_indices = [idx for idx, label in enumerate(prototype_labels) if normalize_segment_label(label) != "background"]
+
+    for segment_idx, segment in enumerate(segments):
+        start = float(segment["start"])
+        end = float(segment["end"])
+        segment_mid = (start + end) / 2.0
+
+        if segment_idx == len(segments) - 1:
+            mask = (centers_arr >= start) & (centers_arr <= end)
+        else:
+            mask = (centers_arr >= start) & (centers_arr < end)
+
+        frame_indices = np.where(mask)[0]
+        if len(frame_indices) == 0:
+            # If no frame center falls inside the segment interval, use the nearest
+            # frame center to avoid defaulting to background for tiny segments.
+            nearest_idx = int(np.argmin(np.abs(centers_arr - segment_mid))) if len(centers_arr) > 0 else None
+            if nearest_idx is None:
+                labels.append("background")
+                mean_positive_masses.append(0.0)
+                max_positive_masses.append(0.0)
+                continue
+
+            nearest_probs = prototype_probabilities[nearest_idx]
+            masses = {}
+            for normalized_label, proto_indices in group_indices.items():
+                masses[normalized_label] = float(np.sum(nearest_probs[proto_indices]))
+
+            background_mass = masses.get("background", 0.0)
+            positive_masses = {label: mass for label, mass in masses.items() if label != "background"}
+
+            if positive_proto_indices:
+                pos_mass = float(np.sum(nearest_probs[positive_proto_indices]))
+            else:
+                pos_mass = 0.0
+            mean_positive_masses.append(pos_mass)
+            max_positive_masses.append(pos_mass)
+
+            if not positive_masses:
+                labels.append("background")
+            else:
+                best_positive_label = max(positive_masses.items(), key=lambda item: item[1])[0]
+                best_positive_mass = positive_masses[best_positive_label]
+                total_positive_mass = float(sum(positive_masses.values()))
+                if pos_mass >= 0.5:
+                    labels.append(best_positive_label)
+                elif (best_positive_mass >= background_mass or total_positive_mass > background_mass) and pos_mass >= 0.35:
+                    labels.append(best_positive_label)
+                else:
+                    labels.append("background")
+            continue
+
+        masses = {}
+        for normalized_label, proto_indices in group_indices.items():
+            masses[normalized_label] = float(np.sum(prototype_probabilities[frame_indices][:, proto_indices]))
+
+        background_mass = masses.get("background", 0.0)
+        positive_masses = {label: mass for label, mass in masses.items() if label != "background"}
+
+        if positive_proto_indices:
+            per_frame_positive_mass = np.sum(prototype_probabilities[frame_indices][:, positive_proto_indices], axis=1)
+            mean_positive = float(np.mean(per_frame_positive_mass))
+            max_positive = float(np.max(per_frame_positive_mass))
+        else:
+            mean_positive = 0.0
+            max_positive = 0.0
+
+        mean_positive_masses.append(mean_positive)
+        max_positive_masses.append(max_positive)
+
+        if not positive_masses:
+            labels.append("background")
+            continue
+
+        best_positive_label = max(positive_masses.items(), key=lambda item: item[1])[0]
+        best_positive_mass = positive_masses[best_positive_label]
+        total_positive_mass = float(sum(positive_masses.values()))
+
+        # Primary decision is based on the same foreground confidence curve shown
+        # in the UI. This prevents false background suggestions inside sustained
+        # high-confidence plateaus.
+        if mean_positive >= 0.5 or max_positive >= 0.8:
+            labels.append(best_positive_label)
+        elif (best_positive_mass >= background_mass or total_positive_mass > background_mass) and mean_positive >= 0.35:
+            labels.append(best_positive_label)
+        else:
+            labels.append("background")
+
+    # Correct short background islands between two identical positive labels when
+    # the island itself still has strong positive confidence.
+    corrected = list(labels)
+    for idx in range(1, len(corrected) - 1):
+        prev_label = corrected[idx - 1]
+        next_label = corrected[idx + 1]
+        curr_label = corrected[idx]
+
+        if curr_label != "background":
+            continue
+        if prev_label == "background" or next_label == "background":
+            continue
+        if prev_label != next_label:
+            continue
+
+        # Conservative thresholds: only relabel when the segment itself has
+        # clear positive evidence to avoid over-smoothing true background gaps.
+        if mean_positive_masses[idx] >= 0.6 or max_positive_masses[idx] >= 0.85:
+            corrected[idx] = prev_label
+
+    return corrected
+
+
 def build_segments_response(payload):
     """Execute segmentation pipeline and return API response payload.
 
@@ -245,7 +399,7 @@ def build_segments_response(payload):
                     fallback_clusters,
                 )
 
-            frame_labels, probabilities, _, _ = infer_frame_labels_and_probabilities(
+            frame_labels, probabilities, prototype_probabilities, prototype_labels = infer_frame_labels_and_probabilities(
                 query_embeddings,
                 positive_prototypes,
                 background_prototypes,
@@ -259,7 +413,12 @@ def build_segments_response(payload):
                 window_size=PROBABILITY_WINDOW_SIZE,
             )
             segments = build_segments_from_splits(audio_length, change_point_times, num_segments)
-            suggested_labels = infer_segment_labels(segments, timings_centers, frame_labels)
+            suggested_labels = infer_segment_labels_from_probabilities(
+                segments,
+                timings_centers,
+                prototype_probabilities,
+                prototype_labels,
+            )
             source = "acpd-probability-curve"
             prototype_summary = {
                 "positive_labels": sorted(list(positive_prototypes.keys())),
