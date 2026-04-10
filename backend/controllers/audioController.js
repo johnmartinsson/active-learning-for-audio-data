@@ -13,15 +13,40 @@ const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, p
 const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
 const backendRoot = path.join(__dirname, '..');
 
+/**
+ * Normalize free-text labels to lowercase canonical form.
+ *
+ * @param {string} label - Raw label value.
+ * @returns {string} Normalized label.
+ */
 const normalizeLabel = (label) => String(label || '').trim().toLowerCase();
 
+/**
+ * Check whether a label should be treated as background-like.
+ *
+ * @param {string} label - Label to test.
+ * @returns {boolean} True for background/absence-like labels.
+ */
 const isBackgroundLikeLabel = (label) => {
   const normalized = normalizeLabel(label);
   return normalized === '' || normalized === 'background' || normalized === 'absence';
 };
 
+/**
+ * Identify the legacy binary positive label.
+ *
+ * @param {string} label - Label to test.
+ * @returns {boolean} True when the normalized label is `presence`.
+ */
 const isLegacyPresenceLabel = (label) => normalizeLabel(label) === 'presence';
 
+/**
+ * Run a Python script and parse JSON response from stdout.
+ *
+ * @param {string} scriptName - Script filename under `backend/scripts`.
+ * @param {Object} inputData - JSON payload written to stdin.
+ * @returns {Promise<Object>} Parsed JSON output from the script.
+ */
 const runPythonJsonScript = (scriptName, inputData) => {
   return new Promise((resolve, reject) => {
     const pythonExecutable = process.env.PYTHON_BIN || 'python3';
@@ -60,6 +85,13 @@ const runPythonJsonScript = (scriptName, inputData) => {
   });
 };
 
+/**
+ * Run a Python module with `python -m` and parse JSON stdout.
+ *
+ * @param {string} moduleName - Importable Python module path.
+ * @param {Object} inputData - JSON payload written to stdin.
+ * @returns {Promise<Object>} Parsed JSON output from the module.
+ */
 const runPythonJsonModule = (moduleName, inputData) => {
   return new Promise((resolve, reject) => {
     const pythonExecutable = process.env.PYTHON_BIN || 'python3';
@@ -97,7 +129,14 @@ const runPythonJsonModule = (moduleName, inputData) => {
   });
 };
 
-// At the top of audioController.js, or put this in a separate utils file
+/**
+ * Compute legacy binary prototypes from saved labels and embeddings.
+ *
+ * This helper supports existing JS sampling strategies and is kept for
+ * backward compatibility while migration continues in Python.
+ *
+ * @returns {{presence_prototype:number[], absence_prototype:number[]}} Prototype pair.
+ */
 const computePrototypes = () => {
   const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
   const embeddingsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'embeddings');
@@ -184,6 +223,11 @@ const computePrototypes = () => {
   return { presence_prototype, absence_prototype };
 };
 
+/**
+ * List basenames of files that already have saved labels.
+ *
+ * @returns {string[]} Labeled file basenames.
+ */
 const getLabeledFileNames = () => {
     const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
     if (!fs.existsSync(labelsDir)) {
@@ -192,12 +236,27 @@ const getLabeledFileNames = () => {
     return fs.readdirSync(labelsDir).map(file => path.parse(file).name);
 };
 
+/**
+ * List basenames of audio files without saved labels.
+ *
+ * @returns {string[]} Unlabeled file basenames.
+ */
 const getUnlabeledFileNames = () => {
     const labeledFileNames = getLabeledFileNames();
     const allFileNames = metadata.files.audio_files.map(file => path.parse(file).name);
     return allFileNames.filter(file => !labeledFileNames.includes(file));
 };
 
+/**
+ * HTTP handler: return discovered positive class names.
+ *
+ * Classes are inferred from existing label files and exclude background-like
+ * and legacy binary labels.
+ *
+ * @param {import('express').Request} req - Express request.
+ * @param {import('express').Response} res - Express response.
+ * @returns {Promise<void>|void}
+ */
 const getClasses = (req, res) => {
   try {
     const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
@@ -242,6 +301,13 @@ const getClasses = (req, res) => {
   }
 };
 
+/**
+ * Legacy helper that invokes the old Python CPD script.
+ *
+ * @param {number[]} probabilities - Foreground probability curve.
+ * @param {number} numSegments - Requested number of segments.
+ * @returns {Promise<number[]>} Change-point indices.
+ */
 const detectChangePoints = (probabilities, numSegments) => {
   return new Promise((resolve, reject) => {
       const pythonProcess = spawn('python', ['scripts/change_point_detection.py']);
@@ -270,6 +336,15 @@ const detectChangePoints = (probabilities, numSegments) => {
   });
 };
 
+/**
+ * HTTP handler: return segmentation proposal for a specific file.
+ *
+ * Delegates segmentation logic to `python.acpd.get_segments_cli`.
+ *
+ * @param {import('express').Request} req - Express request.
+ * @param {import('express').Response} res - Express response.
+ * @returns {Promise<void>}
+ */
 const getSegments = async (req, res) => {
   try {
       const { filename } = req.params;
@@ -306,6 +381,16 @@ const getSegments = async (req, res) => {
   }
 };
 
+/**
+ * HTTP handler: return the next annotation batch according to strategy.
+ *
+ * Supported strategies include random, uncertainty, certainty, and
+ * high_probability.
+ *
+ * @param {import('express').Request} req - Express request.
+ * @param {import('express').Response} res - Express response.
+ * @returns {Promise<void>}
+ */
 const getBatch = async (req, res) => {
   try {
     // 1) Parse inputs from query params instead of the request body
@@ -374,6 +459,16 @@ const getBatch = async (req, res) => {
 };
   
   
+/**
+ * HTTP handler: persist segment labels and update embedding caches.
+ *
+ * Writes labels to `labels/<filename>.txt` and updates the corresponding
+ * msgpack payload with legacy binary and multiclass embedding partitions.
+ *
+ * @param {import('express').Request} req - Express request.
+ * @param {import('express').Response} res - Express response.
+ * @returns {void}
+ */
 const submitLabels = (req, res) => {
     const filename = req.params.filename;
     console.log('submitting labels filename:', filename);

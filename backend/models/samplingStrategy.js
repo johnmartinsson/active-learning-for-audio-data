@@ -3,22 +3,46 @@ const PrototypicalNetwork = require('./prototypicalNetwork');
 const msgpack = require('msgpack-lite');
 require('dotenv').config();
 
+/**
+ * Base class for file-level sampling strategies.
+ */
 class SamplingStrategy {
+    /**
+     * @param {string[]} audioFileNames - Candidate file basenames.
+     */
     constructor(audioFileNames) {
         this.audioFileNames = audioFileNames;
     }
 
+    /**
+     * Sample file names according to strategy-specific criteria.
+     *
+     * @abstract
+     * @returns {string[]|Promise<string[]>} Selected file basenames.
+     */
     sample() {
         throw new Error('sample() must be implemented by subclass');
     }
 }
 
+/**
+ * Uniform random sampling over unlabeled files.
+ */
 class RandomSamplingStrategy extends SamplingStrategy {
+    /**
+     * @param {string[]} audioFileNames - Candidate file basenames.
+     * @param {number} batchSize - Number of files to return.
+     */
     constructor(audioFileNames, batchSize) {
         super(audioFileNames);
         this.batchSize = batchSize;
     }
 
+    /**
+     * Return a random subset of files.
+     *
+     * @returns {string[]} Randomly sampled file basenames.
+     */
     sample() {
         const shuffled = this.audioFileNames.sort(() => 0.5 - Math.random());
         console.log('random sampling');
@@ -26,7 +50,15 @@ class RandomSamplingStrategy extends SamplingStrategy {
     }
 }
 
+/**
+ * Entropy-based uncertainty sampling using a binary prototypical model.
+ */
 class UncertaintySamplingStrategy extends SamplingStrategy {
+    /**
+     * @param {string[]} audioFileNames - Candidate file basenames.
+     * @param {number} batchSize - Number of files to return.
+     * @param {{presence_prototype:number[], absence_prototype:number[]}} prototypes - Binary prototypes.
+     */
     constructor(audioFileNames, batchSize, prototypes) {
         super(audioFileNames);
         this.batchSize = batchSize;
@@ -34,6 +66,11 @@ class UncertaintySamplingStrategy extends SamplingStrategy {
         this.protoNet = new PrototypicalNetwork(prototypes.presence_prototype, prototypes.absence_prototype);
     }
 
+    /**
+     * Rank files by average predictive entropy (descending).
+     *
+     * @returns {Promise<string[]>} Most uncertain file basenames.
+     */
     async sample() {
         console.log('uncertainty sampling');
         const filesWithUncertainty = [];
@@ -82,7 +119,15 @@ class UncertaintySamplingStrategy extends SamplingStrategy {
     }
 }
 
+/**
+ * Low-entropy certainty sampling using a binary prototypical model.
+ */
 class CertaintySamplingStrategy extends SamplingStrategy {
+    /**
+     * @param {string[]} audioFileNames - Candidate file basenames.
+     * @param {number} batchSize - Number of files to return.
+     * @param {{presence_prototype:number[], absence_prototype:number[]}} prototypes - Binary prototypes.
+     */
     constructor(audioFileNames, batchSize, prototypes) {
         super(audioFileNames);
         this.batchSize = batchSize;
@@ -90,6 +135,11 @@ class CertaintySamplingStrategy extends SamplingStrategy {
         this.protoNet = new PrototypicalNetwork(prototypes.presence_prototype, prototypes.absence_prototype);
     }
 
+    /**
+     * Rank files by average predictive entropy (ascending).
+     *
+     * @returns {Promise<string[]>} Most certain file basenames.
+     */
     async sample() {
         console.log('certainty sampling');
         const filesWithUncertainty = [];
@@ -138,7 +188,15 @@ class CertaintySamplingStrategy extends SamplingStrategy {
     }
 }
 
+/**
+ * High-probability sampling using mean foreground probability.
+ */
 class HighProbabilitySamplingStrategy extends SamplingStrategy {
+    /**
+     * @param {string[]} audioFileNames - Candidate file basenames.
+     * @param {number} batchSize - Number of files to return.
+     * @param {{presence_prototype:number[], absence_prototype:number[]}} prototypes - Binary prototypes.
+     */
     constructor(audioFileNames, batchSize, prototypes) {
         super(audioFileNames);
         this.batchSize = batchSize;
@@ -146,6 +204,11 @@ class HighProbabilitySamplingStrategy extends SamplingStrategy {
         this.protoNet = new PrototypicalNetwork(prototypes.presence_prototype, prototypes.absence_prototype);
     }
 
+    /**
+     * Rank files by average foreground probability (descending).
+     *
+     * @returns {Promise<string[]>} File basenames with strongest predicted presence.
+     */
     async sample() {
         console.log('certainty sampling');
         const filesWithProbability = [];

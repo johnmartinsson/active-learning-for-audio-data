@@ -1,4 +1,13 @@
 // ./backend/app.js
+/**
+ * Backend API server entrypoint.
+ *
+ * Responsibilities:
+ * - Load environment configuration.
+ * - Initialize Express middleware.
+ * - Serve dataset assets under `/data`.
+ * - Mount audio-related API routes under `/api/audio`.
+ */
 require('dotenv').config();
 const express = require('express');
 const path = require('path');

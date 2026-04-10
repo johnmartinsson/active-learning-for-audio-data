@@ -1,4 +1,13 @@
 // ./backend/routes/audioRoutes.js
+/**
+ * Audio API route declarations.
+ *
+ * This router exposes the backend endpoints used by the annotation UI for:
+ * - selecting unlabeled files,
+ * - retrieving available classes,
+ * - computing segmentation proposals,
+ * - persisting user labels.
+ */
 const express = require('express');
 const {
   getBatch,
