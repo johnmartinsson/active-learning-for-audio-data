@@ -1,12 +1,12 @@
 """Method registry for A-CPD segmentation strategies."""
 
-from .methods import active, fixed
+from .methods import adaptive, fixed
 
 
 METHODS = {
     "fixed": fixed.run,
-    "active": active.run,
-    "acpd_probability": active.run,
+    "active": adaptive.run,
+    "acpd_probability": adaptive.run,
 }
 
 

@@ -37,7 +37,7 @@ The pipeline now uses a simple method registry:
 Current methods:
 
 - `methods/fixed.py`: equal-width segmentation
-- `methods/active.py`: prototype-based adaptive segmentation (A-CPD/F-CPD behavior)
+- `methods/adaptive.py`: prototype-based adaptive segmentation (A-CPD/F-CPD behavior)
 - `methods/common.py`: shared segment utilities and soft label suggestion helpers
 
 `pipeline.py` remains the orchestration layer:
