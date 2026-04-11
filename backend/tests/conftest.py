@@ -11,8 +11,11 @@ import msgpack
 import numpy as np
 import pytest
 
+from python.acpd.data import load_embeddings_and_timings, to_centers
+
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
+TESTS_DATA_ROOT = BACKEND_ROOT / "tests" / "data"
 
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
@@ -112,16 +115,6 @@ def sample_dataset(tmp_path, sample_timings, sample_embeddings, write_msgpack):
 
 
 @pytest.fixture
-def xfail_not_implemented():
-    """Return helper that marks a scaffold test as intentionally incomplete."""
-
-    def _xfail(method_name):
-        pytest.xfail(f"Test not implemented for method: {method_name}")
-
-    return _xfail
-
-
-@pytest.fixture
 def capture_cli(monkeypatch):
     """Return helper to run simple stdin/stdout-driven CLI functions."""
 
@@ -133,3 +126,35 @@ def capture_cli(monkeypatch):
         return stdout
 
     return _capture
+
+
+@pytest.fixture
+def synthetic_dataset():
+    """Return helper that loads generated synthetic datasets from tests/data."""
+
+    def _load(dataset_name):
+        dataset_root = TESTS_DATA_ROOT / dataset_name
+        labels_dir = dataset_root / "labels"
+        embeddings_dir = dataset_root / "embeddings"
+        query_path = embeddings_dir / "query.birdnet.embeddings.msgpack"
+
+        assert dataset_root.exists(), f"Synthetic dataset not found: {dataset_root}"
+        assert labels_dir.exists(), f"Missing labels directory: {labels_dir}"
+        assert embeddings_dir.exists(), f"Missing embeddings directory: {embeddings_dir}"
+        assert query_path.exists(), f"Missing query embeddings file: {query_path}"
+
+        timings_arr, query_embeddings = load_embeddings_and_timings(str(query_path))
+        centers = to_centers(timings_arr)
+        audio_length = float(timings_arr[-1, 1]) if len(timings_arr) > 0 else 0.0
+
+        return {
+            "root": dataset_root,
+            "labels_dir": str(labels_dir),
+            "embeddings_dir": str(embeddings_dir),
+            "timings_arr": timings_arr,
+            "timings_centers": centers,
+            "query_embeddings": query_embeddings,
+            "audio_length": audio_length,
+        }
+
+    return _load
