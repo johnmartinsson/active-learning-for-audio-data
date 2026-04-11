@@ -6,7 +6,6 @@ const msgpack = require('msgpack-lite');
 const { spawn } = require('child_process');
 
 const { RandomSamplingStrategy, UncertaintySamplingStrategy, CertaintySamplingStrategy, HighProbabilitySamplingStrategy } = require('../models/samplingStrategy');
-const PrototypicalNetwork = require('../models/prototypicalNetwork');
 require('dotenv').config();
 
 const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, process.env.METADATA_FILE);
@@ -39,51 +38,6 @@ const isBackgroundLikeLabel = (label) => {
  * @returns {boolean} True when the normalized label is `presence`.
  */
 const isLegacyPresenceLabel = (label) => normalizeLabel(label) === 'presence';
-
-/**
- * Run a Python script and parse JSON response from stdout.
- *
- * @param {string} scriptName - Script filename under `backend/scripts`.
- * @param {Object} inputData - JSON payload written to stdin.
- * @returns {Promise<Object>} Parsed JSON output from the script.
- */
-const runPythonJsonScript = (scriptName, inputData) => {
-  return new Promise((resolve, reject) => {
-    const pythonExecutable = process.env.PYTHON_BIN || 'python3';
-    const scriptPath = path.join(backendRoot, 'scripts', scriptName);
-    const pythonProcess = spawn(pythonExecutable, [scriptPath], { cwd: backendRoot });
-
-    let stdout = '';
-    let stderr = '';
-
-    pythonProcess.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-
-    pythonProcess.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    pythonProcess.on('error', (error) => {
-      reject(error);
-    });
-
-    pythonProcess.on('close', (code) => {
-      if (code !== 0) {
-        return reject(new Error(`Python script ${scriptName} exited with code ${code}: ${stderr.trim()}`));
-      }
-
-      try {
-        resolve(JSON.parse(stdout));
-      } catch (error) {
-        reject(new Error(`Failed to parse JSON from ${scriptName}: ${error.message}. Output: ${stdout}`));
-      }
-    });
-
-    pythonProcess.stdin.write(JSON.stringify(inputData));
-    pythonProcess.stdin.end();
-  });
-};
 
 /**
  * Run a Python module with `python -m` and parse JSON stdout.
@@ -299,41 +253,6 @@ const getClasses = (req, res) => {
     console.error('Error in getClasses:', error);
     return res.status(500).json({ message: 'Failed to load classes' });
   }
-};
-
-/**
- * Legacy helper that invokes the old Python CPD script.
- *
- * @param {number[]} probabilities - Foreground probability curve.
- * @param {number} numSegments - Requested number of segments.
- * @returns {Promise<number[]>} Change-point indices.
- */
-const detectChangePoints = (probabilities, numSegments) => {
-  return new Promise((resolve, reject) => {
-      const pythonProcess = spawn('python', ['scripts/change_point_detection.py']);
-
-      const inputData = { probabilities, num_segments: numSegments };
-      // console.log("Sending input data:", inputData);  // Log input data to console
-
-      pythonProcess.stdin.write(JSON.stringify(inputData));
-      pythonProcess.stdin.end();
-
-      let data = '';
-      pythonProcess.stdout.on('data', (chunk) => {
-          data += chunk.toString();
-      });
-
-      pythonProcess.stderr.on('data', (chunk) => {
-          console.error(`Python error: ${chunk.toString()}`);
-      });
-
-      pythonProcess.on('close', (code) => {
-          if (code !== 0) {
-              return reject(new Error(`Python script exited with code ${code}`));
-          }
-          resolve(JSON.parse(data));
-      });
-  });
 };
 
 /**

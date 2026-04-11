@@ -3,6 +3,8 @@
 This document explains how the current Python segmentation pipeline works in:
 
 - `backend/python/acpd/pipeline.py`
+- `backend/python/acpd/registry.py`
+- `backend/python/acpd/methods/`
 - `backend/python/acpd/prototypes.py`
 - `backend/python/acpd/change_detection.py`
 - `backend/python/acpd/data.py`
@@ -22,6 +24,29 @@ In short:
 5. Run A-CPD style change-point detection on that curve.
 6. Build segments from top change points under the requested segment budget.
 7. Suggest a label per segment using soft probability mass aggregation.
+
+## Method Registry and Orchestration
+
+The pipeline now uses a simple method registry:
+
+- `registry.py` resolves a method runner from either:
+	- `adapted_method` (explicit selector), or
+	- legacy `labeling_strategy_choice` (backward compatibility).
+- Method implementations live in `methods/`.
+
+Current methods:
+
+- `methods/fixed.py`: equal-width segmentation
+- `methods/active.py`: prototype-based adaptive segmentation (A-CPD/F-CPD behavior)
+- `methods/common.py`: shared segment utilities and soft label suggestion helpers
+
+`pipeline.py` remains the orchestration layer:
+
+1. Parse and normalize payload.
+2. Load embeddings/timings once.
+3. Build shared context.
+4. Resolve and execute method.
+5. Assemble stable API response shape.
 
 ## Detailed Formulation
 
