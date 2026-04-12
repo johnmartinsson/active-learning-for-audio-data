@@ -87,6 +87,57 @@ def distance_past_and_future_averages(sequence, distance_fn, offset=0, window_si
     return scores
 
 
+def distance_adjacent_windows_at_boundaries(sequence, distance_fn, window_size=1):
+    """Score frame boundaries by comparing adjacent window means.
+
+    For each boundary between frames ``i`` and ``i+1``, this computes a score
+    from the mean of the ``window_size`` frames ending at ``i`` and the mean
+    of the ``window_size`` frames starting at ``i+1``.
+
+    The returned score array has one value per frame index, with boundary
+    scores stored at the RIGHT frame index (``i+1``). Index ``0`` is always
+    ``0.0`` because there is no left boundary for the first frame.
+
+    Parameters
+    ----------
+    sequence : np.ndarray | list
+        Input sequence with shape ``(n_frames,)`` or ``(n_frames, n_features)``.
+    distance_fn : Callable[[np.ndarray, np.ndarray], float]
+        Distance metric between adjacent window means.
+    window_size : int, default=1
+        Number of frames per adjacent averaging window.
+
+    Returns
+    -------
+    np.ndarray
+        Boundary change curve with one score per frame index.
+    """
+    values = np.asarray(sequence, dtype=np.float64)
+    if values.ndim == 1:
+        values = values.reshape((-1, 1))
+
+    n_frames = len(values)
+    scores = np.zeros(n_frames, dtype=np.float64)
+    if n_frames == 0:
+        return scores
+
+    if window_size <= 0:
+        raise ValueError("window_size must be >= 1")
+
+    # Boundary i|i+1 exists for i in [window_size-1, n_frames-window_size-1].
+    for i in range(window_size - 1, n_frames - window_size):
+        left_start = i - window_size + 1
+        left_end = i + 1
+        right_start = i + 1
+        right_end = i + 1 + window_size
+
+        left_mean = np.mean(values[left_start:left_end, :], axis=0)
+        right_mean = np.mean(values[right_start:right_end, :], axis=0)
+        scores[i + 1] = distance_fn(left_mean, right_mean)
+
+    return scores
+
+
 def rank_change_point_peaks(scores, prominence, n_peaks):
     """Select the most prominent change-point peaks.
 
@@ -121,8 +172,50 @@ def rank_change_point_peaks(scores, prominence, n_peaks):
     return selected_indices, selected_prominences
 
 
+def rank_change_point_boundaries(scores, min_score, n_peaks):
+    """Select strongest frame-boundary change scores.
+
+    Unlike local-peak ranking, this keeps the top-scoring boundaries directly.
+    This avoids missing rapid alternations where adjacent boundaries can all be
+    informative but do not form isolated local maxima.
+
+    Parameters
+    ----------
+    scores : np.ndarray | list[float]
+        Boundary score values aligned to frame indices.
+    min_score : float
+        Minimum boundary score to keep.
+    n_peaks : int
+        Maximum number of boundaries to return.
+
+    Returns
+    -------
+    tuple[list[int], list[float]]
+        Sorted selected boundary indices and corresponding scores.
+    """
+    values = np.asarray(scores, dtype=np.float64)
+    if len(values) == 0 or n_peaks <= 0:
+        return [], []
+
+    # Index 0 cannot represent a valid left-right boundary.
+    candidates = [
+        (idx, float(values[idx]))
+        for idx in range(1, len(values))
+        if float(values[idx]) > float(min_score)
+    ]
+    if not candidates:
+        return [], []
+
+    ranked = sorted(candidates, key=lambda item: (-item[1], item[0]))
+    selected = ranked[:n_peaks]
+    selected_indices = sorted(idx for idx, _ in selected)
+    score_by_idx = {idx: score for idx, score in selected}
+    selected_scores = [score_by_idx[idx] for idx in selected_indices]
+    return selected_indices, selected_scores
+
+
 def peak_times_from_indices(timings, peak_indices):
-    """Map peak frame indices to real-valued times.
+    """Map peak frame indices to real-valued boundary times.
 
     Parameters
     ----------
@@ -134,12 +227,13 @@ def peak_times_from_indices(timings, peak_indices):
     Returns
     -------
     list[float]
-        Midpoint times for selected change points.
+        Start times of selected frames, which correspond to the boundary before
+        each selected index when scores are boundary-aligned.
     """
     if len(peak_indices) == 0:
         return []
 
-    peak_timings = np.mean(timings[peak_indices], axis=1)
+    peak_timings = timings[peak_indices, 0]
     return [float(time_value) for time_value in peak_timings.tolist()]
 
 
@@ -164,13 +258,12 @@ def detect_change_points_from_probabilities(probabilities, timings, n_peaks, pro
     tuple[list[float], list[float], list[int], list[float]]
         ``(peak_times, curve_scores, peak_indices, peak_prominences)``.
     """
-    scores = distance_past_and_future_averages(
+    scores = distance_adjacent_windows_at_boundaries(
         np.asarray(probabilities, dtype=np.float64),
         distance_fn=euclidean_distance_score,
-        offset=0,
         window_size=window_size,
     )
-    peak_indices, prominences = rank_change_point_peaks(scores, prominence=prominence, n_peaks=n_peaks)
+    peak_indices, prominences = rank_change_point_boundaries(scores, min_score=prominence, n_peaks=n_peaks)
     return peak_times_from_indices(timings, peak_indices), scores.tolist(), peak_indices, prominences
 
 
