@@ -40,6 +40,7 @@ const AnnotationTool = ({
   // Probability data (only relevant if labelingStrategyChoice is "active")
   const [probabilities, setProbabilities] = useState([]);
   const [timings, setTimings] = useState([]);
+  const [changePointTimes, setChangePointTimes] = useState([]);
 
   // On first load or whenever file/strategy/numSegments change, fetch from the backend
   useEffect(() => {
@@ -94,6 +95,7 @@ const AnnotationTool = ({
         });
         setProbabilities(data.probabilities || []);
         setTimings(data.timings || []);
+        setChangePointTimes(data.changePointTimes || []);
       } catch (err) {
         console.error('Error fetching segments from server:', err);
       }
@@ -245,6 +247,7 @@ const AnnotationTool = ({
             audioLength={file.audio_length}
             segments={segments}
             currentTime={currentTime}
+            changePointTimes={changePointTimes}
           />
         )}
         <Waveform

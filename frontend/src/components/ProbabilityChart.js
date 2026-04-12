@@ -9,7 +9,7 @@ import {
     ReferenceLine,
 } from 'recharts';
 
-const ProbabilityChart = ({ probabilities, timings, audioLength, segments = [], currentTime = 0 }) => {
+const ProbabilityChart = ({ probabilities, timings, audioLength, segments = [], currentTime = 0, changePointTimes = [] }) => {
     const [data, setData] = useState([]);
 
     useEffect(() => {
@@ -71,6 +71,21 @@ const ProbabilityChart = ({ probabilities, timings, audioLength, segments = [], 
                         x={segment.start}
                         stroke="#b0b0b0"
                         strokeDasharray="3 3"
+                    />
+                ))}
+                {changePointTimes.map((t, idx) => (
+                    <ReferenceLine
+                        key={`cp-${idx}`}
+                        x={t}
+                        stroke="#d62728"
+                        strokeWidth={1.5}
+                        label={{
+                            value: '×',
+                            position: 'top',
+                            fill: '#d62728',
+                            fontSize: 14,
+                            fontWeight: 'bold',
+                        }}
                     />
                 ))}
                 <ReferenceLine x={currentTime} stroke="#ff6f00" />
