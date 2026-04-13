@@ -1,2 +1,4 @@
 scipy
 numpy
+msgpack
+pytest

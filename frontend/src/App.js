@@ -5,6 +5,7 @@ import './styles.css';
 
 const App = () => {
   const [batch, setBatch] = useState([]);
+  const [annotationClasses, setAnnotationClasses] = useState(['background']);
 
   // Sample strategy settings
   const [sampleStrategyChoice, setSampleStrategyChoice] = useState('random');
@@ -13,6 +14,8 @@ const App = () => {
   // Labeling strategy settings
   const [labelingStrategyChoice, setLabelingStrategyChoice] = useState('fixed');
   const [numSegments, setNumSegments] = useState(10);
+  const [negativeClusteringMethod, setNegativeClusteringMethod] = useState('none');
+  const [numNegativeClusters, setNumNegativeClusters] = useState(1);
 
   // --- 1) Load from localStorage in its own effect ---
   useEffect(() => {
@@ -31,6 +34,12 @@ const App = () => {
       if (parsedState.numSegments !== undefined) {
         setNumSegments(parsedState.numSegments);
       }
+      if (parsedState.negativeClusteringMethod !== undefined) {
+        setNegativeClusteringMethod(parsedState.negativeClusteringMethod);
+      }
+      if (parsedState.numNegativeClusters !== undefined) {
+        setNumNegativeClusters(parsedState.numNegativeClusters);
+      }
     }
   }, []);
 
@@ -41,9 +50,24 @@ const App = () => {
       batchSize,
       labelingStrategyChoice,
       numSegments,
+      negativeClusteringMethod,
+      numNegativeClusters,
     };
     localStorage.setItem('appState', JSON.stringify(appState));
-  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments]);
+  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, negativeClusteringMethod, numNegativeClusters]);
+
+  const fetchClasses = useCallback(() => {
+    const url = new URL('http://localhost:5000/api/audio/classes');
+
+    fetch(url, { method: 'GET' })
+      .then((response) => response.json())
+      .then((data) => {
+        const backendClasses = Array.isArray(data.classes) ? data.classes : [];
+        const next = ['background', ...backendClasses.filter((c) => c && c !== 'background')];
+        setAnnotationClasses(Array.from(new Set(next)));
+      })
+      .catch((error) => console.error('Error fetching classes:', error));
+  }, []);
 
   // 2) fetchBatch depends on sampleStrategyChoice, batchSize, etc.
   //    Now using GET with query params
@@ -67,10 +91,19 @@ const App = () => {
     fetchBatch();
   }, [sampleStrategyChoice, batchSize, fetchBatch]);
 
+  useEffect(() => {
+    fetchClasses();
+  }, [fetchClasses]);
+
   // Save settings to localStorage whenever they change
   useEffect(() => {
     saveStateToLocalStorage();
-  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, saveStateToLocalStorage]);
+  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, negativeClusteringMethod, numNegativeClusters, saveStateToLocalStorage]);
+
+  const handleLabelsSubmitted = useCallback(() => {
+    fetchBatch();
+    fetchClasses();
+  }, [fetchBatch, fetchClasses]);
 
   const handleSampleStrategyChange = (event) => {
     setSampleStrategyChoice(event.target.value);
@@ -86,6 +119,18 @@ const App = () => {
 
   const handleNumSegmentsChange = (event) => {
     setNumSegments(parseInt(event.target.value, 10));
+  };
+
+  const handleNegativeClusteringMethodChange = (event) => {
+    const nextMethod = event.target.value;
+    setNegativeClusteringMethod(nextMethod);
+    if (nextMethod === 'none') {
+      setNumNegativeClusters(1);
+    }
+  };
+
+  const handleNumNegativeClustersChange = (event) => {
+    setNumNegativeClusters(parseInt(event.target.value, 10));
   };
 
   return (
@@ -144,13 +189,43 @@ const App = () => {
         />
       </div>
 
+      <div className="input-group">
+        <label htmlFor="negativeClusteringMethod" className="input-label">Negative Clustering Method:</label>
+        <select
+          id="negativeClusteringMethod"
+          value={negativeClusteringMethod}
+          onChange={handleNegativeClusteringMethodChange}
+          className="select-input"
+        >
+          <option value="none">None (single background prototype)</option>
+          <option value="kmeans">KMeans</option>
+        </select>
+      </div>
+
+      <div className="input-group">
+        <label htmlFor="numNegativeClusters" className="input-label">Number of Negative Clusters:</label>
+        <input
+          type="number"
+          id="numNegativeClusters"
+          value={numNegativeClusters}
+          onChange={handleNumNegativeClustersChange}
+          min="1"
+          disabled={negativeClusteringMethod === 'none'}
+          className="number-input"
+        />
+      </div>
+
       {batch.map((file, index) => (
         <AnnotationTool
           key={index}
           file={file}
-          onLabelsSubmitted={fetchBatch}
+          onLabelsSubmitted={handleLabelsSubmitted}
           labelingStrategyChoice={labelingStrategyChoice}
           numSegments={numSegments}
+          negativeClusteringMethod={negativeClusteringMethod}
+          numNegativeClusters={numNegativeClusters}
+          availableClasses={annotationClasses}
+          onClassesChange={setAnnotationClasses}
         />
       ))}
     </div>

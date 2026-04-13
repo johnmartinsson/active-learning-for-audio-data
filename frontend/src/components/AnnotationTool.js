@@ -3,17 +3,46 @@ import React, { useState, useEffect } from 'react';
 import Waveform from './Waveform';
 import Spectrogram from './Spectrogram';
 import ProbabilityChart from './ProbabilityChart';
+import ClassSelector from "./ClassSelector";
 
-const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSegments }) => {
+const AnnotationTool = ({
+  file,
+  onLabelsSubmitted,
+  labelingStrategyChoice,
+  numSegments,
+  negativeClusteringMethod,
+  numNegativeClusters,
+  availableClasses,
+  onClassesChange
+}) => {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
   const [segments, setSegments] = useState([]);
   const [labels, setLabels] = useState([]);
+  const [classes, setClasses] = useState(availableClasses && availableClasses.length > 0 ? availableClasses : ['background']);
+  const [currentClass, setCurrentClass] = useState('background');
+
+  const sameClassList = (a, b) => {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false;
+    }
+    return a.every((value, idx) => value === b[idx]);
+  };
+
+  useEffect(() => {
+    if (!Array.isArray(availableClasses) || availableClasses.length === 0) {
+      return;
+    }
+
+    setClasses(availableClasses);
+    setCurrentClass((prev) => (availableClasses.includes(prev) ? prev : (availableClasses[1] || 'background')));
+  }, [availableClasses]);
 
   // Probability data (only relevant if labelingStrategyChoice is "active")
   const [probabilities, setProbabilities] = useState([]);
   const [timings, setTimings] = useState([]);
+  const [changePointTimes, setChangePointTimes] = useState([]);
 
   // On first load or whenever file/strategy/numSegments change, fetch from the backend
   useEffect(() => {
@@ -23,6 +52,8 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
         const url = new URL(`http://localhost:5000/api/audio/${file.filename}/segments`);
         url.searchParams.set('labelingStrategyChoice', labelingStrategyChoice);
         url.searchParams.set('numSegments', numSegments.toString());
+        url.searchParams.set('negativeClusteringMethod', negativeClusteringMethod);
+        url.searchParams.set('numNegativeClusters', numNegativeClusters.toString());
 
         const response = await fetch(url, {
           method: 'GET'
@@ -32,32 +63,124 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
         }
         const data = await response.json();
 
-        setSegments(data.segments || []);
-        setLabels(data.suggestedLabels || []);
+        const safeSegments = data.segments || [];
+        const suggested = data.suggestedLabels || [];
+
+        const normalizedLabels = safeSegments.map((_, idx) => {
+          const label = suggested[idx];
+
+          // Legacy backend suggestions are binary; treat them as unlabeled/background.
+          if (!label || label === 'presence' || label === 'absence' || label === 'background') {
+            return 'background';
+          }
+
+          return label;
+        });
+
+        const discoveredClasses = Array.from(
+          new Set(normalizedLabels.filter((label) => label && label !== 'background'))
+        );
+        const baseClasses = Array.isArray(availableClasses) && availableClasses.length > 0
+          ? availableClasses
+          : ['background'];
+        const nextClasses = Array.from(new Set(['background', ...baseClasses, ...discoveredClasses]));
+
+        setSegments(safeSegments);
+        setLabels(normalizedLabels);
+        setClasses(nextClasses);
+        if (onClassesChange && !sameClassList(baseClasses, nextClasses)) {
+          onClassesChange(nextClasses);
+        }
+        setCurrentClass((prev) => {
+          if (nextClasses.includes(prev)) {
+            return prev;
+          }
+          return nextClasses[1] || 'background';
+        });
         setProbabilities(data.probabilities || []);
         setTimings(data.timings || []);
+        setChangePointTimes(data.changePointTimes || []);
       } catch (err) {
         console.error('Error fetching segments from server:', err);
       }
     };
 
     fetchSegments();
-  }, [file, labelingStrategyChoice, numSegments]);
+  }, [file, labelingStrategyChoice, numSegments, negativeClusteringMethod, numNegativeClusters, availableClasses, onClassesChange]);
+
+  const [selectorState, setSelectorState] = useState({
+    visible: false,
+    segmentIndex: null,
+    x: 0,
+    y: 0
+  });
 
   const handlePlayPause = () => {
     setIsPlaying(!isPlaying);
   };
 
-  const toggleLabel = (time) => {
-    // Flip the label in whichever segment the user clicked
-    const updatedLabels = labels.map((label, i) => {
-      const seg = segments[i];
-      if (time >= seg.start && time < seg.end) {
-        return label === 'absence' ? 'presence' : 'absence';
-      }
-      return label;
+  const openClassSelector = (segmentIndex, x, y) => {
+    setSelectorState({
+      visible: true,
+      segmentIndex,
+      x,
+      y
     });
-    setLabels(updatedLabels);
+  };
+
+  const assignClass = (className) => {
+    const newLabels = [...labels];
+    newLabels[selectorState.segmentIndex] = className;
+
+    setLabels(newLabels);
+
+    setSelectorState({
+      visible: false,
+      segmentIndex: null,
+      x: 0,
+      y: 0
+    });
+  };
+
+  const assignCurrentClassToSegment = (segmentIndex) => {
+    if (segmentIndex < 0 || segmentIndex >= labels.length) {
+      return;
+    }
+
+    const newLabels = [...labels];
+    const existing = newLabels[segmentIndex] || 'background';
+    newLabels[segmentIndex] = existing === currentClass ? 'background' : currentClass;
+    setLabels(newLabels);
+  };
+
+  const createClass = () => {
+    const name = prompt('Enter new class name:');
+    const cleanedName = (name || '').trim();
+
+    if (!cleanedName) {
+      return;
+    }
+
+    const isDuplicate = classes.some(
+      (existingClass) => existingClass.toLowerCase() === cleanedName.toLowerCase()
+    );
+
+    if (!isDuplicate) {
+      const updatedClasses = [...classes, cleanedName];
+      setClasses(updatedClasses);
+      if (onClassesChange) {
+        onClassesChange(updatedClasses);
+      }
+      setCurrentClass(cleanedName);
+      assignClass(cleanedName);
+      return;
+    }
+
+    const existingClass = classes.find(
+      (className) => className.toLowerCase() === cleanedName.toLowerCase()
+    ) || cleanedName;
+    setCurrentClass(existingClass);
+    assignClass(existingClass);
   };
 
   const handleSubmit = async () => {
@@ -94,13 +217,31 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
   return (
     <div className="annotation-tool">
       <h3>{file.filename}</h3>
+      <div style={{ marginBottom: '10px' }}>
+        <strong>Current labeling class:</strong>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '6px' }}>
+          {classes.map((className) => (
+            <label key={className} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <input
+                type="radio"
+                name="current-labeling-class"
+                value={className}
+                checked={currentClass === className}
+                onChange={() => setCurrentClass(className)}
+              />
+              <span>{className}</span>
+            </label>
+          ))}
+        </div>
+      </div>
       <div className="media-container">
         <Spectrogram
           src={`http://localhost:5000${file.spectrogram_path}`}
           currentTime={currentTime}
           segments={segments}
           labels={labels}
-          toggleLabel={toggleLabel}
+          onAssignSegment={assignCurrentClassToSegment}
+          openClassSelector={openClassSelector}
           duration={file.audio_length}
         />
         {labelingStrategyChoice === 'active' && (
@@ -108,6 +249,9 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
             probabilities={probabilities}
             timings={timings}
             audioLength={file.audio_length}
+            segments={segments}
+            currentTime={currentTime}
+            changePointTimes={changePointTimes}
           />
         )}
         <Waveform
@@ -124,6 +268,15 @@ const AnnotationTool = ({ file, onLabelsSubmitted, labelingStrategyChoice, numSe
       <button onClick={handleSubmit}>
         Submit Labels
       </button>
+      {selectorState.visible && (
+        <ClassSelector
+          x={selectorState.x}
+          y={selectorState.y}
+          classes={classes}
+          onSelect={assignClass}
+          onNewClass={createClass}
+        />
+      )}
     </div>
   );
 };

@@ -6,13 +6,91 @@ const msgpack = require('msgpack-lite');
 const { spawn } = require('child_process');
 
 const { RandomSamplingStrategy, UncertaintySamplingStrategy, CertaintySamplingStrategy, HighProbabilitySamplingStrategy } = require('../models/samplingStrategy');
-const PrototypicalNetwork = require('../models/prototypicalNetwork');
 require('dotenv').config();
 
 const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, process.env.METADATA_FILE);
 const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+const backendRoot = path.join(__dirname, '..');
 
-// At the top of audioController.js, or put this in a separate utils file
+/**
+ * Normalize free-text labels to lowercase canonical form.
+ *
+ * @param {string} label - Raw label value.
+ * @returns {string} Normalized label.
+ */
+const normalizeLabel = (label) => String(label || '').trim().toLowerCase();
+
+/**
+ * Check whether a label should be treated as background-like.
+ *
+ * @param {string} label - Label to test.
+ * @returns {boolean} True for background/absence-like labels.
+ */
+const isBackgroundLikeLabel = (label) => {
+  const normalized = normalizeLabel(label);
+  return normalized === '' || normalized === 'background' || normalized === 'absence';
+};
+
+/**
+ * Identify the legacy binary positive label.
+ *
+ * @param {string} label - Label to test.
+ * @returns {boolean} True when the normalized label is `presence`.
+ */
+const isLegacyPresenceLabel = (label) => normalizeLabel(label) === 'presence';
+
+/**
+ * Run a Python module with `python -m` and parse JSON stdout.
+ *
+ * @param {string} moduleName - Importable Python module path.
+ * @param {Object} inputData - JSON payload written to stdin.
+ * @returns {Promise<Object>} Parsed JSON output from the module.
+ */
+const runPythonJsonModule = (moduleName, inputData) => {
+  return new Promise((resolve, reject) => {
+    const pythonExecutable = process.env.PYTHON_BIN || 'python3';
+    const pythonProcess = spawn(pythonExecutable, ['-m', moduleName], { cwd: backendRoot });
+
+    let stdout = '';
+    let stderr = '';
+
+    pythonProcess.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    pythonProcess.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    pythonProcess.on('error', (error) => {
+      reject(error);
+    });
+
+    pythonProcess.on('close', (code) => {
+      if (code !== 0) {
+        return reject(new Error(`Python module ${moduleName} exited with code ${code}: ${stderr.trim()}`));
+      }
+
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (error) {
+        reject(new Error(`Failed to parse JSON from module ${moduleName}: ${error.message}. Output: ${stdout}`));
+      }
+    });
+
+    pythonProcess.stdin.write(JSON.stringify(inputData));
+    pythonProcess.stdin.end();
+  });
+};
+
+/**
+ * Compute legacy binary prototypes from saved labels and embeddings.
+ *
+ * This helper supports existing JS sampling strategies and is kept for
+ * backward compatibility while migration continues in Python.
+ *
+ * @returns {{presence_prototype:number[], absence_prototype:number[]}} Prototype pair.
+ */
 const computePrototypes = () => {
   const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
   const embeddingsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'embeddings');
@@ -68,10 +146,10 @@ const computePrototypes = () => {
       timings.forEach((timing, index) => {
         const timingCenter = (timing[0] + timing[1]) / 2;
         if (timingCenter >= st && timingCenter <= et) {
-          if (label === 'presence') {
-            presence_embeddings.push(embeddings[index]);
-          } else if (label === 'absence') {
+          if (isBackgroundLikeLabel(label)) {
             absence_embeddings.push(embeddings[index]);
+          } else {
+            presence_embeddings.push(embeddings[index]);
           }
         }
       });
@@ -99,6 +177,11 @@ const computePrototypes = () => {
   return { presence_prototype, absence_prototype };
 };
 
+/**
+ * List basenames of files that already have saved labels.
+ *
+ * @returns {string[]} Labeled file basenames.
+ */
 const getLabeledFileNames = () => {
     const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
     if (!fs.existsSync(labelsDir)) {
@@ -107,111 +190,126 @@ const getLabeledFileNames = () => {
     return fs.readdirSync(labelsDir).map(file => path.parse(file).name);
 };
 
+/**
+ * List basenames of audio files without saved labels.
+ *
+ * @returns {string[]} Unlabeled file basenames.
+ */
 const getUnlabeledFileNames = () => {
     const labeledFileNames = getLabeledFileNames();
     const allFileNames = metadata.files.audio_files.map(file => path.parse(file).name);
     return allFileNames.filter(file => !labeledFileNames.includes(file));
 };
 
-const detectChangePoints = (probabilities, numSegments) => {
-  return new Promise((resolve, reject) => {
-      const pythonProcess = spawn('python', ['scripts/change_point_detection.py']);
+/**
+ * HTTP handler: return discovered positive class names.
+ *
+ * Classes are inferred from existing label files and exclude background-like
+ * and legacy binary labels.
+ *
+ * @param {import('express').Request} req - Express request.
+ * @param {import('express').Response} res - Express response.
+ * @returns {Promise<void>|void}
+ */
+const getClasses = (req, res) => {
+  try {
+    const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
+    if (!fs.existsSync(labelsDir)) {
+      return res.status(200).json({ classes: [] });
+    }
 
-      const inputData = { probabilities, num_segments: numSegments };
-      // console.log("Sending input data:", inputData);  // Log input data to console
+    const classSet = new Set();
+    const files = fs.readdirSync(labelsDir).filter((file) => file.endsWith('.txt'));
 
-      pythonProcess.stdin.write(JSON.stringify(inputData));
-      pythonProcess.stdin.end();
+    files.forEach((file) => {
+      const labelPath = path.join(labelsDir, file);
+      const lines = fs.readFileSync(labelPath, 'utf8')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
 
-      let data = '';
-      pythonProcess.stdout.on('data', (chunk) => {
-          data += chunk.toString();
+      if (lines.length <= 1) {
+        return;
+      }
+
+      lines.slice(1).forEach((line) => {
+        const parts = line.split(',');
+        if (parts.length < 3) {
+          return;
+        }
+
+        const labelValue = parts.slice(2).join(',').trim();
+        const normalized = normalizeLabel(labelValue);
+        if (!normalized || isBackgroundLikeLabel(normalized) || isLegacyPresenceLabel(normalized)) {
+          return;
+        }
+
+        classSet.add(normalized);
       });
+    });
 
-      pythonProcess.stderr.on('data', (chunk) => {
-          console.error(`Python error: ${chunk.toString()}`);
-      });
-
-      pythonProcess.on('close', (code) => {
-          if (code !== 0) {
-              return reject(new Error(`Python script exited with code ${code}`));
-          }
-          resolve(JSON.parse(data));
-      });
-  });
+    return res.status(200).json({ classes: Array.from(classSet).sort() });
+  } catch (error) {
+    console.error('Error in getClasses:', error);
+    return res.status(500).json({ message: 'Failed to load classes' });
+  }
 };
 
+/**
+ * HTTP handler: return segmentation proposal for a specific file.
+ *
+ * Delegates segmentation logic to `python.acpd.get_segments_cli`.
+ *
+ * @param {import('express').Request} req - Express request.
+ * @param {import('express').Response} res - Express response.
+ * @returns {Promise<void>}
+ */
 const getSegments = async (req, res) => {
   try {
       const { filename } = req.params;
       const labelingStrategyChoice = req.query.labelingStrategyChoice || 'fixed';
       const numSegments = parseInt(req.query.numSegments, 10) || 10;
+      const negativeClusteringMethod = req.query.negativeClusteringMethod || 'none';
+      const numNegativeClusters = parseInt(req.query.numNegativeClusters, 10) || 1;
       const audioLength = metadata.files.audio_lengths[`${filename}.wav`];
+      const embeddingsPath = path.join(
+        process.env.DATA_DIR,
+        process.env.DATASET_NAME,
+        'embeddings',
+        `${filename}.birdnet.embeddings.msgpack`
+      );
+      const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
+      const embeddingsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'embeddings');
 
-      if (labelingStrategyChoice === 'fixed') {
-          const segmentLength = audioLength / numSegments;
-          const segments = [];
-          for (let i = 0; i < numSegments; i++) {
-              segments.push({ start: i * segmentLength, end: (i + 1) * segmentLength });
-          }
-          const suggestedLabels = Array(numSegments).fill('absence');
-          return res.status(200).json({ segments, probabilities: [], timings: [], suggestedLabels });
-      }
-
-      const embeddingsPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'embeddings', `${filename}.birdnet.embeddings.msgpack`);
-      const buffer = fs.readFileSync(embeddingsPath);
-      const embeddingsData = msgpack.decode(buffer);
-      const { embeddings, timings } = embeddingsData;
-
-      const { presence_prototype, absence_prototype } = computePrototypes();
-      const net = new PrototypicalNetwork(presence_prototype, absence_prototype);
-      const probabilities = net.predict(embeddings);
-
-      const changePoints = await detectChangePoints(probabilities, numSegments);
-
-      const segments = [];
-      let start = 0;
-      changePoints.forEach(point => {
-          const splitTime = (timings[point][0] + timings[point][1]) / 2;
-          segments.push({ start, end: splitTime });
-          start = splitTime;
-      });
-      segments.push({ start, end: audioLength });
-
-      let suggestedLabels = segments.map(segment => {
-        const segmentProbabilities = timings
-            .map((time, idx) => {
-                const center = (time[0] + time[1]) / 2;
-                return center >= segment.start && center < segment.end ? probabilities[idx] : null;
-            })
-            .filter(prob => prob !== null);
-    
-        const averageProbability = segmentProbabilities.reduce((sum, prob) => sum + prob, 0) / segmentProbabilities.length;
-        return averageProbability >= 0.5 ? 'presence' : 'absence';
+      const segmentResponse = await runPythonJsonModule('python.acpd.get_segments_cli', {
+        filename,
+        labeling_strategy_choice: labelingStrategyChoice,
+        requested_num_segments: numSegments,
+        audio_length: audioLength,
+        embeddings_path: embeddingsPath,
+        labels_dir: labelsDir,
+        embeddings_dir: embeddingsDir,
+        negative_clustering_method: negativeClusteringMethod,
+        num_negative_clusters: numNegativeClusters,
       });
 
-      // Helper for checking bimodality
-      function isBiModal(probabilities) {
-        const lowThreshold = 0.3;
-        const highThreshold = 0.7;
-        const lowCount = probabilities.filter(p => p <= lowThreshold).length;
-        const highCount = probabilities.filter(p => p >= highThreshold).length;
-        const totalCount = probabilities.length;
-        return (lowCount / totalCount > 0.1) && (highCount / totalCount > 0.1);
-      }
-
-      const bimodal = isBiModal(probabilities);
-      if (!bimodal) {
-          suggestedLabels = suggestedLabels.map(() => 'absence');
-      }
-
-      return res.status(200).json({ segments, probabilities, timings: timings.map(t => (t[0] + t[1]) / 2), suggestedLabels });
+      return res.status(200).json(segmentResponse);
   } catch (error) {
       console.error('Error in getSegments:', error);
       return res.status(500).json({ message: 'Failed to compute segments' });
   }
 };
 
+/**
+ * HTTP handler: return the next annotation batch according to strategy.
+ *
+ * Supported strategies include random, uncertainty, certainty, and
+ * high_probability.
+ *
+ * @param {import('express').Request} req - Express request.
+ * @param {import('express').Response} res - Express response.
+ * @returns {Promise<void>}
+ */
 const getBatch = async (req, res) => {
   try {
     // 1) Parse inputs from query params instead of the request body
@@ -280,6 +378,16 @@ const getBatch = async (req, res) => {
 };
   
   
+/**
+ * HTTP handler: persist segment labels and update embedding caches.
+ *
+ * Writes labels to `labels/<filename>.txt` and updates the corresponding
+ * msgpack payload with legacy binary and multiclass embedding partitions.
+ *
+ * @param {import('express').Request} req - Express request.
+ * @param {import('express').Response} res - Express response.
+ * @returns {void}
+ */
 const submitLabels = (req, res) => {
     const filename = req.params.filename;
     console.log('submitting labels filename:', filename);
@@ -313,16 +421,24 @@ const submitLabels = (req, res) => {
             const { timings, embeddings } = embeddingsData;
             const presence_embeddings = [];
             const absence_embeddings = [];
+            const class_embeddings = {};
 
             labels.forEach(label => {
-                const labelCenter = (label.start_time + label.end_time) / 2;
+              const normalizedLabel = normalizeLabel(label.label) || 'background';
                 timings.forEach((timing, index) => {
                     const timingCenter = (timing[0] + timing[1]) / 2;
                     if (timingCenter >= label.start_time && timingCenter <= label.end_time) {
-                        if (label.label === 'presence') {
+                  if (isBackgroundLikeLabel(normalizedLabel)) {
+                    absence_embeddings.push(embeddings[index]);
+                  } else {
                             presence_embeddings.push(embeddings[index]);
-                        } else if (label.label === 'absence') {
-                            absence_embeddings.push(embeddings[index]);
+
+                    if (!isLegacyPresenceLabel(normalizedLabel)) {
+                      if (!class_embeddings[normalizedLabel]) {
+                        class_embeddings[normalizedLabel] = [];
+                      }
+                      class_embeddings[normalizedLabel].push(embeddings[index]);
+                    }
                         }
                     }
                 });
@@ -330,6 +446,7 @@ const submitLabels = (req, res) => {
 
             embeddingsData.presence_embeddings = presence_embeddings;
             embeddingsData.absence_embeddings = absence_embeddings;
+            embeddingsData.class_embeddings = class_embeddings;
 
             const updatedData = msgpack.encode(embeddingsData);
             fs.writeFile(embeddingsPath, updatedData, (err) => {
@@ -343,4 +460,4 @@ const submitLabels = (req, res) => {
     });
 };
 
-module.exports = { getBatch, submitLabels, getLabeledFileNames, getUnlabeledFileNames, getSegments };
+module.exports = { getBatch, submitLabels, getLabeledFileNames, getUnlabeledFileNames, getSegments, getClasses };
