@@ -3,13 +3,30 @@ from typing import Callable
 
 import numpy as np
 
-from python.acpd.data import is_background_label, load_embeddings_and_timings, read_label_rows
+from python.acpd.data import (
+    collect_labeled_embeddings,
+    is_background_label,
+    load_embeddings_and_timings,
+    normalize_segment_label,
+    read_label_rows,
+)
+from python.acpd.prototypes import (
+    compute_background_prototypes,
+    compute_mean_prototypes,
+    infer_frame_labels_and_probabilities,
+)
 
 
 def _binary_entropy(probabilities: np.ndarray) -> np.ndarray:
     probs = np.asarray(probabilities, dtype=np.float64)
     probs = np.clip(probs, 1e-12, 1.0 - 1e-12)
     return -(probs * np.log2(probs) + (1.0 - probs) * np.log2(1.0 - probs))
+
+
+def _multiclass_entropy(probabilities: np.ndarray) -> np.ndarray:
+    probs = np.asarray(probabilities, dtype=np.float64)
+    probs = np.clip(probs, 1e-12, 1.0)
+    return -np.sum(probs * np.log2(probs), axis=1)
 
 
 def _presence_probabilities(
@@ -113,6 +130,93 @@ def _score_files(
     return scored_files
 
 
+def _aggregate_probabilities_by_label(
+    prototype_probabilities: np.ndarray,
+    prototype_labels: list[str],
+) -> tuple[np.ndarray, list[str]]:
+    grouped = {}
+    order = []
+    for idx, label in enumerate(prototype_labels):
+        collapsed = normalize_segment_label(label)
+        if collapsed not in grouped:
+            grouped[collapsed] = np.asarray(prototype_probabilities[:, idx], dtype=np.float64).copy()
+            order.append(collapsed)
+        else:
+            grouped[collapsed] += np.asarray(prototype_probabilities[:, idx], dtype=np.float64)
+
+    if not order:
+        return np.empty((len(prototype_probabilities), 0), dtype=np.float64), []
+
+    stacked = np.stack([grouped[label] for label in order], axis=1)
+    return stacked, order
+
+
+def _compute_multiclass_prototypes(
+    labels_dir: str,
+    embeddings_dir: str,
+    negative_clustering_method: str,
+    num_negative_clusters: int,
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    class_vectors, background_vectors = collect_labeled_embeddings(labels_dir, embeddings_dir)
+    positive_prototypes = compute_mean_prototypes(class_vectors)
+    background_prototypes = compute_background_prototypes(
+        background_vectors,
+        negative_clustering_method,
+        num_negative_clusters,
+    )
+    return positive_prototypes, background_prototypes
+
+
+def _multiclass_file_score(
+    embeddings: np.ndarray,
+    positive_prototypes: dict[str, np.ndarray],
+    background_prototypes: dict[str, np.ndarray],
+    mode: str,
+) -> float:
+    if len(embeddings) == 0:
+        return float("-inf")
+
+    _, _, prototype_probabilities, prototype_labels = infer_frame_labels_and_probabilities(
+        embeddings,
+        positive_prototypes,
+        background_prototypes,
+    )
+    if len(prototype_labels) == 0:
+        return float("-inf")
+
+    class_probs, class_labels = _aggregate_probabilities_by_label(
+        np.asarray(prototype_probabilities, dtype=np.float64),
+        prototype_labels,
+    )
+    if class_probs.shape[1] == 0:
+        return float("-inf")
+
+    if "background" in class_labels:
+        bg_idx = class_labels.index("background")
+        frame_weights = 1.0 - class_probs[:, bg_idx]
+    else:
+        frame_weights = np.ones(class_probs.shape[0], dtype=np.float64)
+
+    if mode == "entropy":
+        frame_uncertainty = _multiclass_entropy(class_probs)
+    elif mode == "margin":
+        if class_probs.shape[1] == 1:
+            frame_uncertainty = np.zeros(class_probs.shape[0], dtype=np.float64)
+        else:
+            sorted_probs = np.sort(class_probs, axis=1)
+            top1 = sorted_probs[:, -1]
+            top2 = sorted_probs[:, -2]
+            frame_uncertainty = 1.0 - (top1 - top2)
+    else:
+        raise ValueError(f"Unsupported multiclass score mode: {mode}")
+
+    denom = float(np.sum(frame_weights))
+    if denom <= 1e-12:
+        return float(np.mean(frame_uncertainty))
+
+    return float(np.sum(frame_uncertainty * frame_weights) / denom)
+
+
 def sample_files(payload: dict) -> list[str]:
     """Sample a batch of filenames according to the requested strategy."""
     strategy = str(payload.get("strategy", "random") or "random").strip().lower()
@@ -130,6 +234,8 @@ def sample_files(payload: dict) -> list[str]:
 
     labels_dir = str(payload.get("labels_dir", "") or "")
     embeddings_dir = str(payload.get("embeddings_dir", "") or "")
+    negative_clustering_method = str(payload.get("negative_clustering_method", "none") or "none")
+    num_negative_clusters = max(1, int(payload.get("num_negative_clusters", 1)))
     presence_prototype, absence_prototype = _compute_legacy_binary_prototypes(labels_dir, embeddings_dir)
 
     def presence_trace(emb: np.ndarray) -> np.ndarray:
@@ -156,6 +262,29 @@ def sample_files(payload: dict) -> list[str]:
             lambda emb: float(np.mean(presence_trace(emb))),
         )
         scored.sort(key=lambda item: item[1], reverse=True)
+    elif strategy in ("multiclass_entropy", "multiclass_margin"):
+        positive_prototypes, background_prototypes = _compute_multiclass_prototypes(
+            labels_dir,
+            embeddings_dir,
+            negative_clustering_method,
+            num_negative_clusters,
+        )
+
+        if not positive_prototypes:
+            scored = _score_files(
+                unlabeled_files,
+                embeddings_dir,
+                lambda emb: float(np.mean(_binary_entropy(presence_trace(emb)))),
+            )
+            scored.sort(key=lambda item: item[1], reverse=True)
+        else:
+            mode = "entropy" if strategy == "multiclass_entropy" else "margin"
+            scored = _score_files(
+                unlabeled_files,
+                embeddings_dir,
+                lambda emb: _multiclass_file_score(emb, positive_prototypes, background_prototypes, mode),
+            )
+            scored.sort(key=lambda item: item[1], reverse=True)
     else:
         rng = np.random.default_rng()
         shuffled = list(unlabeled_files)

@@ -75,6 +75,8 @@ const App = () => {
     const url = new URL('http://localhost:5000/api/audio/batch');
     url.searchParams.set('strategy', sampleStrategyChoice);
     url.searchParams.set('batchSize', batchSize.toString());
+    url.searchParams.set('negativeClusteringMethod', negativeClusteringMethod);
+    url.searchParams.set('numNegativeClusters', numNegativeClusters.toString());
 
     fetch(url, {
       method: 'GET'
@@ -84,7 +86,7 @@ const App = () => {
         setBatch(data.batch);
       })
       .catch(error => console.error('Error fetching batch:', error));
-  }, [sampleStrategyChoice, batchSize]);
+  }, [sampleStrategyChoice, batchSize, negativeClusteringMethod, numNegativeClusters]);
 
   // --- 3) Trigger fetchBatch any time these settings change ---
   useEffect(() => {
@@ -149,6 +151,8 @@ const App = () => {
           <option value="random">Random Sampling</option>
           <option value="certainty">Certainty Sampling</option>
           <option value="high_probability">High Probability Sampling</option>
+          <option value="multiclass_entropy">Multiclass Entropy Sampling</option>
+          <option value="multiclass_margin">Multiclass Margin Sampling</option>
         </select>
       </div>
 

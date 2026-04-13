@@ -24,6 +24,17 @@ def _write_label_file(labels_dir: Path, stem: str):
     label_path.write_text("start_time,end_time,label\n0,1,chick\n1,2,background\n", encoding="utf-8")
 
 
+def _write_multiclass_label_file(labels_dir: Path, stem: str):
+    label_path = labels_dir / f"{stem}.txt"
+    label_path.write_text(
+        "start_time,end_time,label\n"
+        "0,1,chick\n"
+        "1,2,parent\n"
+        "2,3,background\n",
+        encoding="utf-8",
+    )
+
+
 def _setup_minimal_dirs(tmp_path: Path):
     labels_dir = tmp_path / "labels"
     embeddings_dir = tmp_path / "embeddings"
@@ -116,3 +127,51 @@ def test_sampling_batch_cli_outputs_json(tmp_path):
 
     assert "sampled_files" in parsed
     assert parsed["sampled_files"] == ["f1"]
+
+
+def test_sampling_multiclass_entropy_picks_ambiguous_file(tmp_path):
+    labels_dir, embeddings_dir = _setup_minimal_dirs(tmp_path)
+
+    _write_embeddings_file(embeddings_dir, "labeled", [[1.0, 0.0], [0.0, 1.0], [-1.0, -1.0]])
+    _write_multiclass_label_file(labels_dir, "labeled")
+
+    _write_embeddings_file(embeddings_dir, "ambiguous_mc", [[0.2, 0.2]])
+    _write_embeddings_file(embeddings_dir, "confident_chick", [[1.0, 0.0]])
+
+    sampled = strategies.sample_files(
+        {
+            "strategy": "multiclass_entropy",
+            "batch_size": 1,
+            "unlabeled_files": ["confident_chick", "ambiguous_mc"],
+            "labels_dir": str(labels_dir),
+            "embeddings_dir": str(embeddings_dir),
+            "negative_clustering_method": "none",
+            "num_negative_clusters": 1,
+        }
+    )
+
+    assert sampled == ["ambiguous_mc"]
+
+
+def test_sampling_multiclass_margin_picks_ambiguous_file(tmp_path):
+    labels_dir, embeddings_dir = _setup_minimal_dirs(tmp_path)
+
+    _write_embeddings_file(embeddings_dir, "labeled", [[1.0, 0.0], [0.0, 1.0], [-1.0, -1.0]])
+    _write_multiclass_label_file(labels_dir, "labeled")
+
+    _write_embeddings_file(embeddings_dir, "ambiguous_mc", [[0.2, 0.2]])
+    _write_embeddings_file(embeddings_dir, "confident_parent", [[0.0, 1.0]])
+
+    sampled = strategies.sample_files(
+        {
+            "strategy": "multiclass_margin",
+            "batch_size": 1,
+            "unlabeled_files": ["confident_parent", "ambiguous_mc"],
+            "labels_dir": str(labels_dir),
+            "embeddings_dir": str(embeddings_dir),
+            "negative_clustering_method": "none",
+            "num_negative_clusters": 1,
+        }
+    )
+
+    assert sampled == ["ambiguous_mc"]

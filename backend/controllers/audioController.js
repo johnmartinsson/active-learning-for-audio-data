@@ -301,8 +301,8 @@ const getSegments = async (req, res) => {
 /**
  * HTTP handler: return the next annotation batch according to strategy.
  *
- * Supported strategies include random, uncertainty, certainty, and
- * high_probability.
+ * Supported strategies include random, uncertainty, certainty,
+ * high_probability, multiclass_entropy, and multiclass_margin.
  *
  * @param {import('express').Request} req - Express request.
  * @param {import('express').Response} res - Express response.
@@ -312,6 +312,8 @@ const getBatch = async (req, res) => {
   try {
     const strategy = req.query.strategy || 'random';
     const batchSize = parseInt(req.query.batchSize, 10) || 1;
+    const negativeClusteringMethod = req.query.negativeClusteringMethod || 'none';
+    const numNegativeClusters = parseInt(req.query.numNegativeClusters, 10) || 1;
     const unlabeledFiles = getUnlabeledFileNames();
     const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
     const embeddingsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'embeddings');
@@ -325,6 +327,8 @@ const getBatch = async (req, res) => {
       unlabeled_files: unlabeledFiles,
       labels_dir: labelsDir,
       embeddings_dir: embeddingsDir,
+      negative_clustering_method: negativeClusteringMethod,
+      num_negative_clusters: numNegativeClusters,
     });
 
     const sampledFiles = Array.isArray(samplingResponse.sampled_files)
