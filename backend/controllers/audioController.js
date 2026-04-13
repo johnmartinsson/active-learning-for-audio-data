@@ -1,11 +1,9 @@
 // ./backend/controllers/audioController.js
-const fetch = require('node-fetch');
 const path = require('path');
 const fs = require('fs');
 const msgpack = require('msgpack-lite');
 const { spawn } = require('child_process');
 
-const { RandomSamplingStrategy, UncertaintySamplingStrategy, CertaintySamplingStrategy, HighProbabilitySamplingStrategy } = require('../models/samplingStrategy');
 require('dotenv').config();
 
 const metadataPath = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, process.env.METADATA_FILE);
@@ -312,55 +310,28 @@ const getSegments = async (req, res) => {
  */
 const getBatch = async (req, res) => {
   try {
-    // 1) Parse inputs from query params instead of the request body
     const strategy = req.query.strategy || 'random';
     const batchSize = parseInt(req.query.batchSize, 10) || 1;
     const unlabeledFiles = getUnlabeledFileNames();
+    const labelsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'labels');
+    const embeddingsDir = path.join(process.env.DATA_DIR, process.env.DATASET_NAME, 'embeddings');
 
     console.log('strategy:', strategy);
     console.log('batchSize:', batchSize);
 
-    // 2) Decide which strategy class to use, and whether prototypes are needed
-    let StrategyClass;
-    let needsPrototypes = false;
+    const samplingResponse = await runPythonJsonModule('python.sampling.get_batch_cli', {
+      strategy,
+      batch_size: batchSize,
+      unlabeled_files: unlabeledFiles,
+      labels_dir: labelsDir,
+      embeddings_dir: embeddingsDir,
+    });
 
-    switch (strategy) {
-      case 'uncertainty':
-        StrategyClass = UncertaintySamplingStrategy;
-        needsPrototypes = true;
-        break;
-      case 'certainty':
-        StrategyClass = CertaintySamplingStrategy;
-        needsPrototypes = true;
-        break;
-      case 'high_probability':
-        StrategyClass = HighProbabilitySamplingStrategy;
-        needsPrototypes = true;
-        break;
-      default:
-        // random fallback
-        StrategyClass = RandomSamplingStrategy;
-        needsPrototypes = false;
-        break;
-    }
-
-    // 3) Fetch prototypes only if required, then sample
-    let prototypes;
-    if (needsPrototypes) {
-      prototypes = computePrototypes();
-    }
-
-    let sampledFiles;
-    if (needsPrototypes) {
-      const strategyObj = new StrategyClass(unlabeledFiles, batchSize, prototypes);
-      sampledFiles = await strategyObj.sample();
-    } else {
-      const strategyObj = new StrategyClass(unlabeledFiles, batchSize);
-      sampledFiles = strategyObj.sample();
-    }
+    const sampledFiles = Array.isArray(samplingResponse.sampled_files)
+      ? samplingResponse.sampled_files
+      : [];
     console.log(`sampledFiles (${strategy}):`, sampledFiles);
 
-    // 4) Build response
     const batch = sampledFiles.map((filename) => ({
       filename,
       audio_length: metadata.files.audio_lengths[`${filename}.wav`],
@@ -369,10 +340,9 @@ const getBatch = async (req, res) => {
       embeddings_path: `/data/${process.env.DATASET_NAME}/embeddings/${filename}.birdnet.embeddings.msgpack`
     }));
 
-    // 5) Return JSON
     res.status(200).json({ batch });
   } catch (error) {
-    console.error(`Error fetching prototypes or during ${req.query.strategy || 'random'} sampling:`, error);
+    console.error(`Error during ${req.query.strategy || 'random'} sampling:`, error);
     return res.status(500).json({ message: `Error during batch retrieval` });
   }
 };
