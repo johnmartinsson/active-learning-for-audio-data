@@ -10,6 +10,8 @@ const AnnotationTool = ({
   onLabelsSubmitted,
   labelingStrategyChoice,
   numSegments,
+  negativeClusteringMethod,
+  numNegativeClusters,
   availableClasses,
   onClassesChange
 }) => {
@@ -50,6 +52,8 @@ const AnnotationTool = ({
         const url = new URL(`http://localhost:5000/api/audio/${file.filename}/segments`);
         url.searchParams.set('labelingStrategyChoice', labelingStrategyChoice);
         url.searchParams.set('numSegments', numSegments.toString());
+        url.searchParams.set('negativeClusteringMethod', negativeClusteringMethod);
+        url.searchParams.set('numNegativeClusters', numNegativeClusters.toString());
 
         const response = await fetch(url, {
           method: 'GET'
@@ -102,7 +106,7 @@ const AnnotationTool = ({
     };
 
     fetchSegments();
-  }, [file, labelingStrategyChoice, numSegments, availableClasses, onClassesChange]);
+  }, [file, labelingStrategyChoice, numSegments, negativeClusteringMethod, numNegativeClusters, availableClasses, onClassesChange]);
 
   const [selectorState, setSelectorState] = useState({
     visible: false,

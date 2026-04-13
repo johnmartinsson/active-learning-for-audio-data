@@ -14,6 +14,8 @@ const App = () => {
   // Labeling strategy settings
   const [labelingStrategyChoice, setLabelingStrategyChoice] = useState('fixed');
   const [numSegments, setNumSegments] = useState(10);
+  const [negativeClusteringMethod, setNegativeClusteringMethod] = useState('none');
+  const [numNegativeClusters, setNumNegativeClusters] = useState(1);
 
   // --- 1) Load from localStorage in its own effect ---
   useEffect(() => {
@@ -32,6 +34,12 @@ const App = () => {
       if (parsedState.numSegments !== undefined) {
         setNumSegments(parsedState.numSegments);
       }
+      if (parsedState.negativeClusteringMethod !== undefined) {
+        setNegativeClusteringMethod(parsedState.negativeClusteringMethod);
+      }
+      if (parsedState.numNegativeClusters !== undefined) {
+        setNumNegativeClusters(parsedState.numNegativeClusters);
+      }
     }
   }, []);
 
@@ -42,9 +50,11 @@ const App = () => {
       batchSize,
       labelingStrategyChoice,
       numSegments,
+      negativeClusteringMethod,
+      numNegativeClusters,
     };
     localStorage.setItem('appState', JSON.stringify(appState));
-  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments]);
+  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, negativeClusteringMethod, numNegativeClusters]);
 
   const fetchClasses = useCallback(() => {
     const url = new URL('http://localhost:5000/api/audio/classes');
@@ -88,7 +98,7 @@ const App = () => {
   // Save settings to localStorage whenever they change
   useEffect(() => {
     saveStateToLocalStorage();
-  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, saveStateToLocalStorage]);
+  }, [sampleStrategyChoice, batchSize, labelingStrategyChoice, numSegments, negativeClusteringMethod, numNegativeClusters, saveStateToLocalStorage]);
 
   const handleLabelsSubmitted = useCallback(() => {
     fetchBatch();
@@ -109,6 +119,18 @@ const App = () => {
 
   const handleNumSegmentsChange = (event) => {
     setNumSegments(parseInt(event.target.value, 10));
+  };
+
+  const handleNegativeClusteringMethodChange = (event) => {
+    const nextMethod = event.target.value;
+    setNegativeClusteringMethod(nextMethod);
+    if (nextMethod === 'none') {
+      setNumNegativeClusters(1);
+    }
+  };
+
+  const handleNumNegativeClustersChange = (event) => {
+    setNumNegativeClusters(parseInt(event.target.value, 10));
   };
 
   return (
@@ -167,6 +189,32 @@ const App = () => {
         />
       </div>
 
+      <div className="input-group">
+        <label htmlFor="negativeClusteringMethod" className="input-label">Negative Clustering Method:</label>
+        <select
+          id="negativeClusteringMethod"
+          value={negativeClusteringMethod}
+          onChange={handleNegativeClusteringMethodChange}
+          className="select-input"
+        >
+          <option value="none">None (single background prototype)</option>
+          <option value="kmeans">KMeans</option>
+        </select>
+      </div>
+
+      <div className="input-group">
+        <label htmlFor="numNegativeClusters" className="input-label">Number of Negative Clusters:</label>
+        <input
+          type="number"
+          id="numNegativeClusters"
+          value={numNegativeClusters}
+          onChange={handleNumNegativeClustersChange}
+          min="1"
+          disabled={negativeClusteringMethod === 'none'}
+          className="number-input"
+        />
+      </div>
+
       {batch.map((file, index) => (
         <AnnotationTool
           key={index}
@@ -174,6 +222,8 @@ const App = () => {
           onLabelsSubmitted={handleLabelsSubmitted}
           labelingStrategyChoice={labelingStrategyChoice}
           numSegments={numSegments}
+          negativeClusteringMethod={negativeClusteringMethod}
+          numNegativeClusters={numNegativeClusters}
           availableClasses={annotationClasses}
           onClassesChange={setAnnotationClasses}
         />

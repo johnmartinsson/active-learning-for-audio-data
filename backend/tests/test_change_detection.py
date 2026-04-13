@@ -149,3 +149,33 @@ def test_detect_change_points_from_probabilities_alternating_sequence_detects_ea
     assert peak_indices == [1, 2, 3, 4, 5, 6]
     assert peak_times == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
     assert prominences == [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+
+def test_detect_change_points_from_embeddings_alternating_sequence_detects_each_transition():
+    """Alternating orthogonal embeddings should produce one score per boundary."""
+    embeddings = np.asarray(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [1.0, 0.0],
+        ],
+        dtype=np.float64,
+    )
+    timings = np.asarray([[float(i), float(i + 1)] for i in range(len(embeddings))], dtype=np.float64)
+
+    peak_times, scores, peak_indices, prominences = change_detection.detect_change_points_from_embeddings(
+        embeddings,
+        timings,
+        n_peaks=len(embeddings) - 1,
+        prominence=0.0,
+        window_size=1,
+    )
+
+    assert scores == [0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    assert peak_indices == [1, 2, 3, 4, 5, 6]
+    assert peak_times == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    assert prominences == [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]

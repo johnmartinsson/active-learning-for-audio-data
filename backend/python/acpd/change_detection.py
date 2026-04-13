@@ -279,20 +279,19 @@ def detect_change_points_from_embeddings(embeddings, timings, n_peaks, prominenc
     n_peaks : int
         Number of change points to keep.
     prominence : float, default=0.0
-        Peak prominence threshold.
+        Minimum boundary score threshold.
     window_size : int, default=1
         Local averaging window size for the change curve.
 
     Returns
     -------
     tuple[list[float], list[float], list[int], list[float]]
-        ``(peak_times, curve_scores, peak_indices, peak_prominences)``.
+        ``(peak_times, curve_scores, peak_indices, boundary_scores)``.
     """
-    scores = distance_past_and_future_averages(
+    scores = distance_adjacent_windows_at_boundaries(
         embeddings,
         distance_fn=cosine_distance_score,
-        offset=0,
         window_size=window_size,
     )
-    peak_indices, prominences = rank_change_point_peaks(scores, prominence=prominence, n_peaks=n_peaks)
+    peak_indices, prominences = rank_change_point_boundaries(scores, min_score=prominence, n_peaks=n_peaks)
     return peak_times_from_indices(timings, peak_indices), scores.tolist(), peak_indices, prominences

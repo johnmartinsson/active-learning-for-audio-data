@@ -88,7 +88,11 @@ def is_background_label(label):
         ``True`` if the label belongs to the background-like set.
     """
     normalized = normalize_label(label)
-    return normalized in ("", "background", "absence")
+    return (
+        normalized in ("", "background", "absence")
+        or normalized.startswith("background")
+        or normalized.startswith("absence")
+    )
 
 
 def normalize_segment_label(label):

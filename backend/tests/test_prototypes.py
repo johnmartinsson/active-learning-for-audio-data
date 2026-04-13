@@ -142,6 +142,26 @@ def test_infer_frame_labels_and_probabilities_only_background():
     assert positive_mass == [0.0]  # All background → no positive mass
 
 
+def test_infer_frame_labels_and_probabilities_clustered_background_not_counted_as_positive():
+    """Background_* prototype labels must not contribute to positive mass."""
+    embeddings = np.array([[0.0, 0.0], [10.0, 10.0]], dtype=float)
+    positive = {"chick": np.array([0.0, 0.0], dtype=float)}
+    background = {
+        "background_0": np.array([10.0, 10.0], dtype=float),
+        "background_1": np.array([9.5, 9.5], dtype=float),
+    }
+
+    frame_labels, positive_mass, probs, proto_labels = prototypes.infer_frame_labels_and_probabilities(
+        embeddings, positive, background
+    )
+
+    assert len(frame_labels) == 2
+    assert frame_labels[0] == "chick"
+    assert frame_labels[1].startswith("background")
+    assert positive_mass[0] > positive_mass[1]
+    assert positive_mass[1] < 0.5
+
+
 def test_infer_frame_labels_and_probabilities_with_positive():
     """Test with both positive and background prototypes."""
     embeddings = np.array([
